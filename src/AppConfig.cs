@@ -59,6 +59,7 @@ namespace TranslatorLive
     public class AppConfig
     {
         public bool Dark = true;
+        public string UiLang = "id"; // "id" = Indonesia, "en" = English
         public int UiZoom = 100; // 75..150%
         public string ActiveProfile = "Default";
         public string Src = "en";
@@ -235,6 +236,7 @@ namespace TranslatorLive
                 lock (Sync)
                 {
                     sb.AppendLine("dark=" + (Dark ? 1 : 0));
+                    sb.AppendLine("uiLang=" + UiLang);
                     sb.AppendLine("zoom=" + UiZoom);
                     sb.AppendLine("profile=" + ActiveProfile);
                     sb.AppendLine("src=" + Src);
@@ -286,6 +288,7 @@ namespace TranslatorLive
                     switch (k)
                     {
                         case "dark": c.Dark = n != 0; break;
+                        case "uiLang": if (v == "en" || v == "id") c.UiLang = v; break;
                         case "zoom": c.UiZoom = Math.Max(75, Math.Min(150, n)); break;
                         case "profile": if (!string.IsNullOrEmpty(v)) c.ActiveProfile = v; break;
                         case "src": c.Src = v; break;

@@ -65,6 +65,9 @@ namespace TranslatorLive
         private readonly Timer _toastTimer;
         private readonly Timer _copyTimer;
         private readonly NotifyIcon _tray;
+        private Image _logoBmp;
+
+        private string T(string id, string en) { return _cfg.UiLang == "en" ? en : id; }
 
         private static readonly string[,] SrcLangs = new string[,]
         {
@@ -124,6 +127,14 @@ namespace TranslatorLive
             DoubleBuffered = true;
             KeyPreview = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            try
+            {
+                using (System.IO.Stream rs = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("LingoLensIcon.png"))
+                {
+                    if (rs != null) _logoBmp = Image.FromStream(rs);
+                }
+            }
+            catch { }
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
 
             Rectangle scr = Screen.PrimaryScreen.WorkingArea;
@@ -702,16 +713,26 @@ namespace TranslatorLive
                     g.DrawLine(bp, sideW, 0, sideW, ch);
                 }
 
-                RectangleF logo = SR(S(18f), S(16f), S(28f), S(28f));
-                Theme.FillGradRR(g, logo, S(8f), Color.FromArgb(232, 130, 94), Color.FromArgb(182, 78, 46), 135f);
-                Theme.DrawIcon(g, IconKind.Sparkle, SR(logo.X + S(5f), logo.Y + S(5f), S(18f), S(18f)), Color.White);
-                Theme.DrawTextLeft(g, "LingoLens", fSerifMd, pal.Text, SR(S(54f), S(14f), sideW - S(60f), S(32f)));
+                RectangleF logo = SR(S(16f), S(14f), S(32f), S(32f));
+                if (_logoBmp != null)
+                {
+                    InterpolationMode prevIm = g.InterpolationMode;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(_logoBmp, logo);
+                    g.InterpolationMode = prevIm;
+                }
+                else
+                {
+                    Theme.FillGradRR(g, logo, S(8f), Color.FromArgb(232, 130, 94), Color.FromArgb(182, 78, 46), 135f);
+                    Theme.DrawIcon(g, IconKind.Sparkle, SR(logo.X + S(6f), logo.Y + S(6f), S(20f), S(20f)), Color.White);
+                }
+                Theme.DrawTextLeft(g, "LingoLens", fSerifMd, pal.Text, SR(S(56f), S(14f), sideW - S(62f), S(32f)));
 
                 // Hero Live CTA
                 bool live = _engine.IsRunning;
                 RectangleF liveBtn = SR(S(16f), S(64f), sideW - S(32f), S(40f));
                 DrawAccentBtn(g, pal, "BTN_LIVE", liveBtn,
-                    live ? "Hentikan Live" : "Mulai Live",
+                    live ? T("Hentikan Live", "Stop Live") : T("Mulai Live", "Start Live"),
                     live ? IconKind.Stop : IconKind.Play,
                     live ? pal.Danger : pal.Accent,
                     live ? Color.FromArgb(196, 65, 65) : pal.AccentHover,
@@ -719,11 +740,11 @@ namespace TranslatorLive
 
                 using (SolidBrush stDot = new SolidBrush(live ? pal.Live : pal.TextMute))
                     g.FillEllipse(stDot, S(22f), S(117f), S(7f), S(7f));
-                string statusTxt = live ? ("Aktif" + (_lastMs > 0 ? (" · " + _lastMs + " ms") : "")) : "Standby · Alt+E";
+                string statusTxt = live ? (T("Aktif", "Active") + (_lastMs > 0 ? (" · " + _lastMs + " ms") : "")) : "Standby · Alt+E";
                 Theme.DrawTextLeft(g, statusTxt, fSm, live ? pal.Live : pal.TextMute, SR(S(35f), S(111f), sideW - S(48f), S(18f)));
 
                 // Navigation (4 items including Pembaruan)
-                string[] navNames = new string[] { "Live & Area", "Tampilan", "Sistem", "Pembaruan" };
+                string[] navNames = new string[] { T("Live & Area", "Live & Areas"), T("Tampilan", "Appearance"), T("Sistem", "System"), T("Pembaruan", "Changelog") };
                 IconKind[] navIcons = new IconKind[] { IconKind.Layers, IconKind.Palette, IconKind.Sliders, IconKind.History };
                 float ny = S(150f);
                 for (int i = 0; i < 4; i++)
@@ -755,12 +776,12 @@ namespace TranslatorLive
                 _hits.Add(new Hit { Id = "ZOOM_RESET", Kind = HitKind.Button, Box = zReset });
 
                 DrawSidebarBtn(g, pal, "BTN_THEME", SR(S(16f), by + S(38f), sideW - S(32f), S(34f)),
-                    _cfg.Dark ? "Mode Terang" : "Mode Gelap", _cfg.Dark ? IconKind.Sun : IconKind.Moon, fSmB);
+                    _cfg.Dark ? T("Mode Terang", "Light Mode") : T("Mode Gelap", "Dark Mode"), _cfg.Dark ? IconKind.Sun : IconKind.Moon, fSmB);
 
                 DrawSidebarBtn(g, pal, "BTN_TRAY", SR(S(16f), by + S(76f), sideW - S(32f), S(34f)),
-                    "Sembunyikan ke Tray", IconKind.Tray, fSm);
+                    T("Sembunyikan ke Tray", "Minimize to Tray"), IconKind.Tray, fSm);
 
-                Theme.DrawTextCenter(g, "v2.2  •  by Danzyyy", fCap, pal.TextMute, SR(S(16f), ch - S(28f), sideW - S(32f), S(20f)));
+                Theme.DrawTextCenter(g, "v0.1 Beta  •  by Danzyyy", fCap, pal.TextMute, SR(S(16f), ch - S(28f), sideW - S(32f), S(20f)));
 
                 // 2. TOP WINDOW CHROME BAR
                 float wx = cw - S(10f);
@@ -774,9 +795,9 @@ namespace TranslatorLive
                 RectangleF profDrop = SR(sideW + S(24f), S(6f), S(210f), S(32f));
                 DrawProfilePill(g, pal, profDrop, fSmB);
                 RectangleF saveProf = SR(profDrop.Right + S(6f), S(6f), S(96f), S(32f));
-                DrawOutlineBtn(g, pal, "BTN_SAVE_PROFILE", saveProf, "Simpan", IconKind.Save, fCap, S(8f));
+                DrawOutlineBtn(g, pal, "BTN_SAVE_PROFILE", saveProf, T("Simpan", "Save"), IconKind.Save, fCap, S(8f));
 
-                string modeLabel = AppConfig.IsPortableMode ? "Portable" : "Terinstal";
+                string modeLabel = AppConfig.IsPortableMode ? "Portable" : T("Terinstal", "Installed");
                 Theme.DrawTextLeft(g, modeLabel + (_isFullscreen ? " • Fullscreen" : ""), fCap, pal.TextMute,
                     SR(saveProf.Right + S(14f), S(12f), S(180f), S(20f)));
 
@@ -847,7 +868,7 @@ namespace TranslatorLive
             Font fSerifLg, Font fSec, Font fBody, Font fBodyB, Font fSm, Font fSmB, Font fCap)
         {
             float cy = y;
-            Theme.DrawTextLeft(g, "Area & Terjemahan", fSerifLg, pal.Text, SR(x, cy, S(260f), S(34f)));
+            Theme.DrawTextLeft(g, T("Area & Terjemahan", "Areas & Translation"), fSerifLg, pal.Text, SR(x, cy, S(260f), S(34f)));
 
             float rx = x + w;
             // Engine pill (Google | MyMem | Gemini AI)
@@ -872,17 +893,17 @@ namespace TranslatorLive
 
             cy += S(50f);
 
-            DrawAccentBtn(g, pal, "BTN_ADD_AREA", SR(x, cy, S(142f), S(36f)), "Tambah Area", IconKind.Plus, pal.Accent, pal.AccentHover, fSmB, S(9f));
+            DrawAccentBtn(g, pal, "BTN_ADD_AREA", SR(x, cy, S(142f), S(36f)), T("Tambah Area", "Add Area"), IconKind.Plus, pal.Accent, pal.AccentHover, fSmB, S(9f));
             DrawOutlineBtn(g, pal, "BTN_EDIT_SCREEN", SR(x + S(150f), cy, S(138f), S(36f)),
-                _overlay.EditMode ? "Selesai Edit" : "Edit di Layar", IconKind.EditBox, fSmB, S(9f));
+                _overlay.EditMode ? T("Selesai Edit", "Done Editing") : T("Edit di Layar", "Edit on Screen"), IconKind.EditBox, fSmB, S(9f));
             DrawOutlineBtn(g, pal, "BTN_SCAN", SR(x + S(296f), cy, S(92f), S(36f)), "Scan", IconKind.Refresh, fSmB, S(9f));
-            DrawOutlineBtn(g, pal, "BTN_PREVIEW_LIVE", SR(x + S(396f), cy, S(104f), S(36f)), "Tes Layar", IconKind.Eye, fSmB, S(9f));
+            DrawOutlineBtn(g, pal, "BTN_PREVIEW_LIVE", SR(x + S(396f), cy, S(104f), S(36f)), T("Tes Layar", "Preview"), IconKind.Eye, fSmB, S(9f));
 
             float pmW = S(248f);
             RectangleF pmBox = SR(x + w - pmW, cy + S(1f), pmW, S(34f));
             Theme.FillRR(g, pmBox, S(9f), pal.Well);
             Theme.DrawRR(g, pmBox, S(9f), pal.Border, 1f);
-            string[] pmLbl = new string[] { "Terpisah", "Tutup Asli", "Gabung" };
+            string[] pmLbl = new string[] { T("Terpisah", "Separate"), T("Tutup Asli", "Cover"), T("Gabung", "Merged") };
             float pw = (pmW - S(6f)) / 3f;
             for (int m = 0; m < 3; m++)
                 DrawSegItem(g, pal, "PLACE_" + m, SR(pmBox.X + S(3f) + m * pw, pmBox.Y + S(3f), pw, S(28f)), pmLbl[m], _cfg.Placement == m, fCap);
@@ -928,11 +949,13 @@ namespace TranslatorLive
                 DrawSegItemIdx(g, pal, "AREA_MODE_DLG", SR(modePill.X + S(2f), modePill.Y + S(2f), S(72f), S(24f)),
                     "Dialog", a.Mode == AreaTextMode.Dialog, a.Id, fCap);
                 DrawSegItemIdx(g, pal, "AREA_MODE_CHC", SR(modePill.X + S(76f), modePill.Y + S(2f), S(72f), S(24f)),
-                    "Pilihan", a.Mode == AreaTextMode.Choice, a.Id, fCap);
+                    T("Pilihan", "Choices"), a.Mode == AreaTextMode.Choice, a.Id, fCap);
 
                 // Per-Area Style Quick Pill ("Gaya: 24px" or "Kustom: 18px") -> Opens Tampilan directly on this Area!
                 OverlayStyle eff = a.EffectiveStyle(_cfg);
-                string styleTxt = a.Style.UseCustom ? ("Gaya Khusus • " + eff.FontSize + "px") : ("Gaya Global • " + eff.FontSize + "px");
+                string styleTxt = a.Style.UseCustom
+                    ? (T("Gaya Khusus", "Custom") + " • " + eff.FontSize + "px")
+                    : (T("Gaya Global", "Global") + " • " + eff.FontSize + "px");
                 RectangleF stylePill = SR(card.Right - S(204f), card.Y + S(10f), S(152f), S(28f));
                 DrawAreaActionBtn(g, pal, "AREA_STYLE", stylePill, styleTxt, IconKind.Palette, a.Id,
                     a.Style.UseCustom ? pal.Accent : pal.TextSub, fCap);
@@ -944,11 +967,11 @@ namespace TranslatorLive
                 Theme.FillRR(g, ocrRow, S(8f), pal.Well);
                 using (SolidBrush bBlue = new SolidBrush(Color.FromArgb(86, 152, 255)))
                     g.FillEllipse(bBlue, ocrRow.X + S(12f), ocrRow.Y + S(14f), S(8f), S(8f));
-                Theme.DrawTextLeft(g, "Area OCR", fSmB, pal.Text, SR(ocrRow.X + S(28f), ocrRow.Y, S(84f), ocrRow.Height));
-                string ocrDim = "Lebar " + a.Ocr.Width + " × Tinggi " + a.Ocr.Height + " px   •   " + a.Ocr.X + ", " + a.Ocr.Y;
+                Theme.DrawTextLeft(g, T("Area OCR", "OCR Area"), fSmB, pal.Text, SR(ocrRow.X + S(28f), ocrRow.Y, S(84f), ocrRow.Height));
+                string ocrDim = T("Lebar ", "W ") + a.Ocr.Width + T(" × Tinggi ", " × H ") + a.Ocr.Height + " px   •   " + a.Ocr.X + ", " + a.Ocr.Y;
                 Theme.DrawTextLeft(g, ocrDim, fSm, pal.TextSub, SR(ocrRow.X + S(114f), ocrRow.Y, ocrRow.Width - S(270f), ocrRow.Height));
                 DrawAreaActionBtn(g, pal, "SNIP_OCR", SR(ocrRow.Right - S(146f), ocrRow.Y + S(4f), S(142f), S(28f)),
-                    "Blok Layar OCR", IconKind.Crop, a.Id, Color.FromArgb(86, 152, 255), fCap);
+                    T("Blok Layar OCR", "Snip OCR Area"), IconKind.Crop, a.Id, Color.FromArgb(86, 152, 255), fCap);
 
                 // Row 2: Result Box
                 if (isSeparate)
@@ -957,13 +980,13 @@ namespace TranslatorLive
                     Theme.FillRR(g, resRow, S(8f), pal.Well);
                     using (SolidBrush bCor = new SolidBrush(pal.Accent))
                         g.FillEllipse(bCor, resRow.X + S(12f), resRow.Y + S(14f), S(8f), S(8f));
-                    Theme.DrawTextLeft(g, "Kotak Hasil", fSmB, pal.Text, SR(resRow.X + S(28f), resRow.Y, S(84f), resRow.Height));
-                    string resDim = "Lebar " + a.Result.Width + " × Tinggi " + a.Result.Height + " px   •   " + a.Result.X + ", " + a.Result.Y;
+                    Theme.DrawTextLeft(g, T("Kotak Hasil", "Result Box"), fSmB, pal.Text, SR(resRow.X + S(28f), resRow.Y, S(84f), resRow.Height));
+                    string resDim = T("Lebar ", "W ") + a.Result.Width + T(" × Tinggi ", " × H ") + a.Result.Height + " px   •   " + a.Result.X + ", " + a.Result.Y;
                     Theme.DrawTextLeft(g, resDim, fSm, pal.TextSub, SR(resRow.X + S(114f), resRow.Y, resRow.Width - S(338f), resRow.Height));
 
                     DrawMiniIcon(g, pal, "AREA_SNAP", SR(resRow.Right - S(182f), resRow.Y + S(4f), S(28f), S(28f)), IconKind.Snap, a.Id, false, true);
                     DrawAreaActionBtn(g, pal, "SNIP_RES", SR(resRow.Right - S(146f), resRow.Y + S(4f), S(142f), S(28f)),
-                        "Blok Layar Hasil", IconKind.ResultBox, a.Id, pal.Accent, fCap);
+                        T("Blok Layar Hasil", "Snip Result Box"), IconKind.ResultBox, a.Id, pal.Accent, fCap);
                 }
 
                 cy += cardH + S(12f);
@@ -978,19 +1001,19 @@ namespace TranslatorLive
             Theme.FillRR(g, wSrc, S(9f), pal.Well);
             Theme.DrawTextLeft(g, "OCR", fCap, Color.FromArgb(86, 152, 255), SR(wSrc.X + S(12f), wSrc.Y + S(8f), S(50f), S(16f)));
             Theme.DrawTextRight(g, _liveStatus, fCap, pal.TextMute, SR(wSrc.X + S(64f), wSrc.Y + S(8f), wSrc.Width - S(76f), S(16f)));
-            Theme.DrawTextWrap(g, string.IsNullOrEmpty(_liveSource) ? "Menunggu teks layar..." : _liveSource,
+            Theme.DrawTextWrap(g, string.IsNullOrEmpty(_liveSource) ? T("Menunggu teks layar...", "Waiting for screen text...") : _liveSource,
                 fSm, string.IsNullOrEmpty(_liveSource) ? pal.TextMute : pal.TextSub,
                 SR(wSrc.X + S(12f), wSrc.Y + S(28f), wSrc.Width - S(24f), S(48f)));
 
             RectangleF wRes = SR(wSrc.Right + S(10f), feed.Y + S(14f), halfW, feed.Height - S(28f));
             Theme.FillRR(g, wRes, S(9f), pal.Well);
-            Theme.DrawTextLeft(g, "Terjemahan", fCap, pal.AccentText, SR(wRes.X + S(12f), wRes.Y + S(8f), S(90f), S(16f)));
-            Theme.DrawTextWrap(g, string.IsNullOrEmpty(_liveResult) ? "Hasil terjemahan tampil di sini" : _liveResult,
+            Theme.DrawTextLeft(g, T("Terjemahan", "Translation"), fCap, pal.AccentText, SR(wRes.X + S(12f), wRes.Y + S(8f), S(90f), S(16f)));
+            Theme.DrawTextWrap(g, string.IsNullOrEmpty(_liveResult) ? T("Hasil terjemahan tampil di sini", "Translated text appears here") : _liveResult,
                 fBodyB, string.IsNullOrEmpty(_liveResult) ? pal.TextMute : pal.Text,
                 SR(wRes.X + S(12f), wRes.Y + S(28f), wRes.Width - S(24f), S(48f)));
 
             DrawOutlineBtn(g, pal, "BTN_COPY", SR(wRes.Right + S(10f), feed.Y + S(35f), S(86f), S(38f)),
-                _copiedFlash ? "Tersalin" : "Salin", _copiedFlash ? IconKind.Check : IconKind.Copy, fSmB, S(9f));
+                _copiedFlash ? T("Tersalin", "Copied") : T("Salin", "Copy"), _copiedFlash ? IconKind.Check : IconKind.Copy, fSmB, S(9f));
 
             cy += S(128f);
             return cy - y;
@@ -1003,7 +1026,7 @@ namespace TranslatorLive
             Font fSerifLg, Font fSec, Font fBody, Font fBodyB, Font fSm, Font fSmB, Font fCap)
         {
             float cy = y;
-            Theme.DrawTextLeft(g, "Tampilan Overlay", fSerifLg, pal.Text, SR(x, cy, S(240f), S(34f)));
+            Theme.DrawTextLeft(g, T("Tampilan Overlay", "Overlay Appearance"), fSerifLg, pal.Text, SR(x, cy, S(240f), S(34f)));
 
             // Target Selector: Global | Area 1 | Area 2 ...
             List<Area> areas;
@@ -1022,7 +1045,7 @@ namespace TranslatorLive
             }
 
             DrawAccentBtn(g, pal, "BTN_PREVIEW_LIVE", SR(x + w - S(126f), cy + S(1f), S(126f), S(34f)),
-                "Tes di Layar", IconKind.Eye, pal.Accent, pal.AccentHover, fSmB, S(9f));
+                T("Tes di Layar", "Preview"), IconKind.Eye, pal.Accent, pal.AccentHover, fSmB, S(9f));
             cy += S(48f);
 
             // If editing specific Area, show toggle "Gunakan Gaya Khusus Area Ini"
@@ -1031,7 +1054,7 @@ namespace TranslatorLive
             {
                 RectangleF custBar = SR(x, cy, w, S(44f));
                 Theme.DrawCard(g, pal, custBar, S(10f));
-                Theme.DrawTextLeft(g, "Gunakan tampilan khusus untuk Area ini (berbeda dari Global)", fBodyB, pal.Text,
+                Theme.DrawTextLeft(g, T("Gunakan tampilan khusus untuk Area ini (berbeda dari Global)", "Use custom style for this Area (overrides Global)"), fBodyB, pal.Text,
                     SR(custBar.X + S(16f), custBar.Y, custBar.Width - S(80f), custBar.Height));
                 DrawSwitchScaled(g, pal, SR(custBar.Right - S(56f), custBar.Y, S(42f), custBar.Height), st.UseCustom);
                 _hits.Add(new Hit { Id = "TOG_AREA_CUSTOM_STYLE", Kind = HitKind.Button, Box = custBar });
@@ -1043,7 +1066,7 @@ namespace TranslatorLive
             Theme.FillGradRR(g, stage, S(14f), Color.FromArgb(24, 22, 20), Color.FromArgb(36, 33, 29), 120f);
             Theme.DrawRR(g, stage, S(14f), pal.BorderStrong, 1f);
 
-            string[] presets = new string[] { "Sinema", "Novel", "Kontras", "Tanpa Kotak" };
+            string[] presets = new string[] { T("Sinema", "Cinema"), "Novel", T("Kontras", "Contrast"), T("Tanpa Kotak", "No Box") };
             float px = stage.X + S(14f);
             for (int i = 0; i < 4; i++)
             {
@@ -1081,33 +1104,33 @@ namespace TranslatorLive
             DrawSelect(g, pal, "DROP_FONT", SR(lx + S(88f), ly, lw2 - S(88f), S(34f)), st.Font, fSmB);
             ly += S(48f);
 
-            DrawSliderRow(g, pal, "SL_SIZE", SR(lx, ly, lw2, S(34f)), "Ukuran", st.FontSize + " px", st.FontSize, 12, 56, fSmB);
+            DrawSliderRow(g, pal, "SL_SIZE", SR(lx, ly, lw2, S(34f)), T("Ukuran", "Size"), st.FontSize + " px", st.FontSize, 12, 56, fSmB);
             ly += S(46f);
 
-            Theme.DrawTextLeft(g, "Perataan", fSmB, pal.TextSub, SR(lx, ly, S(84f), S(34f)));
+            Theme.DrawTextLeft(g, T("Perataan", "Align"), fSmB, pal.TextSub, SR(lx, ly, S(84f), S(34f)));
             RectangleF alBox = SR(lx + S(88f), ly, lw2 - S(88f), S(34f));
             Theme.FillRR(g, alBox, S(9f), pal.Well);
             Theme.DrawRR(g, alBox, S(9f), pal.Border, 1f);
-            string[] aligns = new string[] { "Kiri", "Tengah", "Kanan" };
+            string[] aligns = new string[] { T("Kiri", "Left"), T("Tengah", "Center"), T("Kanan", "Right") };
             float aw = (alBox.Width - S(6f)) / 3f;
             for (int i = 0; i < 3; i++)
                 DrawSegItem(g, pal, "ALIGN_" + i, SR(alBox.X + S(3f) + i * aw, alBox.Y + S(3f), aw, S(28f)), aligns[i], st.Align == i, fCap);
             ly += S(48f);
 
-            DrawToggleRow(g, pal, "TOG_BOLD", SR(lx, ly, lw2, S(38f)), "Huruf Tebal", st.Bold, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "TOG_SHADOW", SR(lx, ly, lw2, S(38f)), "Bayangan Teks", st.Shadow, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "TOG_AUTOFIT", SR(lx, ly, lw2, S(38f)), "Auto-Fit Kotak Hasil", st.AutoFit, fBody);
+            DrawToggleRow(g, pal, "TOG_BOLD", SR(lx, ly, lw2, S(38f)), T("Huruf Tebal", "Bold Text"), st.Bold, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "TOG_SHADOW", SR(lx, ly, lw2, S(38f)), T("Bayangan Teks", "Text Shadow"), st.Shadow, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "TOG_AUTOFIT", SR(lx, ly, lw2, S(38f)), T("Auto-Fit Kotak Hasil", "Auto-Fit Result Box"), st.AutoFit, fBody);
 
             RectangleF right = SR(x + colW + colGap, cy, colW, colH);
             Theme.DrawCard(g, pal, right, S(14f));
             float rx = right.X + S(18f), rw2 = right.Width - S(36f), ry = right.Y + S(18f);
 
-            DrawSliderRow(g, pal, "SL_OPAC", SR(rx, ry, rw2, S(34f)), "Opasitas", st.BgOpacity + "%", st.BgOpacity, 0, 100, fSmB); ry += S(46f);
-            DrawSliderRow(g, pal, "SL_OUTLINE", SR(rx, ry, rw2, S(34f)), "Garis Tepi", st.Outline + " px", st.Outline, 0, 6, fSmB); ry += S(46f);
-            DrawSliderRow(g, pal, "SL_CORNER", SR(rx, ry, rw2, S(34f)), "Lengkungan", st.Corner + " px", st.Corner, 0, 28, fSmB); ry += S(46f);
-            DrawSliderRow(g, pal, "SL_PAD", SR(rx, ry, rw2, S(34f)), "Jarak Dalam", st.Padding + " px", st.Padding, 4, 32, fSmB); ry += S(50f);
+            DrawSliderRow(g, pal, "SL_OPAC", SR(rx, ry, rw2, S(34f)), T("Opasitas", "Opacity"), st.BgOpacity + "%", st.BgOpacity, 0, 100, fSmB); ry += S(46f);
+            DrawSliderRow(g, pal, "SL_OUTLINE", SR(rx, ry, rw2, S(34f)), T("Garis Tepi", "Outline"), st.Outline + " px", st.Outline, 0, 6, fSmB); ry += S(46f);
+            DrawSliderRow(g, pal, "SL_CORNER", SR(rx, ry, rw2, S(34f)), T("Lengkungan", "Radius"), st.Corner + " px", st.Corner, 0, 28, fSmB); ry += S(46f);
+            DrawSliderRow(g, pal, "SL_PAD", SR(rx, ry, rw2, S(34f)), T("Jarak Dalam", "Padding"), st.Padding + " px", st.Padding, 4, 32, fSmB); ry += S(50f);
 
-            Theme.DrawTextLeft(g, "Warna", fSmB, pal.TextSub, SR(rx, ry, S(76f), S(30f)));
+            Theme.DrawTextLeft(g, T("Warna", "Colors"), fSmB, pal.TextSub, SR(rx, ry, S(76f), S(30f)));
             for (int i = 0; i < QuickTextColors.Length; i++)
             {
                 RectangleF sw = SR(rx + S(82f) + i * S(34f), ry + S(2f), S(26f), S(26f));
@@ -1119,8 +1142,8 @@ namespace TranslatorLive
             ry += S(42f);
 
             float c3 = (rw2 - S(14f)) / 3f;
-            DrawColorBtn(g, pal, "PICK_TEXT", SR(rx, ry, c3, S(34f)), "Teks", st.TextColor, fCap);
-            DrawColorBtn(g, pal, "PICK_BG", SR(rx + c3 + S(7f), ry, c3, S(34f)), "Latar", st.BgColor, fCap);
+            DrawColorBtn(g, pal, "PICK_TEXT", SR(rx, ry, c3, S(34f)), T("Teks", "Text"), st.TextColor, fCap);
+            DrawColorBtn(g, pal, "PICK_BG", SR(rx + c3 + S(7f), ry, c3, S(34f)), T("Latar", "Back"), st.BgColor, fCap);
             DrawColorBtn(g, pal, "PICK_OUT", SR(rx + (c3 + S(7f)) * 2f, ry, c3, S(34f)), "Outline", st.OutlineColor, fCap);
 
             cy += colH + S(16f);
@@ -1134,43 +1157,52 @@ namespace TranslatorLive
             Font fSerifLg, Font fSec, Font fBody, Font fBodyB, Font fSm, Font fSmB, Font fCap)
         {
             float cy = y;
-            Theme.DrawTextLeft(g, "Sistem & Mesin", fSerifLg, pal.Text, SR(x, cy, S(300f), S(34f)));
+            Theme.DrawTextLeft(g, T("Sistem & Mesin", "System & Engine"), fSerifLg, pal.Text, SR(x, cy, S(300f), S(34f)));
             cy += S(48f);
 
             float colGap = S(14f);
             float colW = (w - colGap) * 0.5f;
-            float colH = S(556f);
+            float colH = S(596f);
 
             RectangleF left = SR(x, cy, colW, colH);
             Theme.DrawCard(g, pal, left, S(14f));
             float lx = left.X + S(18f), lw2 = left.Width - S(36f), ly = left.Y + S(18f);
 
-            DrawSliderRow(g, pal, "SL_INTERVAL", SR(lx, ly, lw2, S(34f)), "Interval Scan", _cfg.Interval + " ms", _cfg.Interval, 100, 1200, fSmB);
+            // UI Language Selector (Indonesia | English)
+            Theme.DrawTextLeft(g, T("Bahasa Aplikasi", "App Language"), fSmB, pal.TextSub, SR(lx, ly, S(130f), S(32f)));
+            RectangleF langBox = SR(lx + lw2 - S(176f), ly, S(176f), S(32f));
+            Theme.FillRR(g, langBox, S(9f), pal.Well);
+            Theme.DrawRR(g, langBox, S(9f), pal.Border, 1f);
+            DrawSegItem(g, pal, "UILANG_id", SR(langBox.X + S(3f), langBox.Y + S(3f), S(84f), S(26f)), "Indonesia", _cfg.UiLang != "en", fCap);
+            DrawSegItem(g, pal, "UILANG_en", SR(langBox.X + S(89f), langBox.Y + S(3f), S(84f), S(26f)), "English", _cfg.UiLang == "en", fCap);
             ly += S(44f);
 
-            string idleLabel = _cfg.AutoHideSeconds == 0 ? "Mati" : (_cfg.AutoHideSeconds + " dtk");
+            DrawSliderRow(g, pal, "SL_INTERVAL", SR(lx, ly, lw2, S(34f)), T("Interval Scan", "Scan Interval"), _cfg.Interval + " ms", _cfg.Interval, 100, 1200, fSmB);
+            ly += S(44f);
+
+            string idleLabel = _cfg.AutoHideSeconds == 0 ? T("Mati", "Off") : (_cfg.AutoHideSeconds + ( _cfg.UiLang == "en" ? " sec" : " dtk"));
             DrawSliderRow(g, pal, "SL_AUTOHIDE", SR(lx, ly, lw2, S(34f)), "Auto Blank", idleLabel, _cfg.AutoHideSeconds, 0, 30, fSmB);
             ly += S(48f);
 
-            DrawToggleRow(g, pal, "SYS_NATURAL", SR(lx, ly, lw2, S(38f)), "Bahasa Sehari-hari Sopan & Natural", _cfg.NaturalTone, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_SPEAKER", SR(lx, ly, lw2, S(38f)), "Deteksi Nama Pembicara (Speaker Badge)", _cfg.DetectSpeaker, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(38f)), "Tunggu teks berhenti mengetik", _cfg.WaitStable, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(38f)), "Gabung baris (mode Dialog)", _cfg.MergeLines, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(38f)), "Sembunyikan kotak saat kosong", _cfg.HideEmpty, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(38f)), "Otomatis Live saat dibuka", _cfg.AutoLive, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), "Tutup ke System Tray", _cfg.CloseToTray, fBody); ly += S(48f);
+            DrawToggleRow(g, pal, "SYS_NATURAL", SR(lx, ly, lw2, S(38f)), T("Bahasa Sehari-hari Sopan & Natural", "Natural Conversational Tone"), _cfg.NaturalTone, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_SPEAKER", SR(lx, ly, lw2, S(38f)), T("Deteksi Nama Pembicara (Speaker Badge)", "Detect Speaker Name (Speaker Badge)"), _cfg.DetectSpeaker, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(38f)), T("Tunggu teks berhenti mengetik", "Wait for typing animation to finish"), _cfg.WaitStable, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(38f)), T("Gabung baris (mode Dialog)", "Merge lines (Dialog mode)"), _cfg.MergeLines, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(38f)), T("Sembunyikan kotak saat kosong", "Hide overlay when empty"), _cfg.HideEmpty, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(38f)), T("Otomatis Live saat dibuka", "Auto-start Live on launch"), _cfg.AutoLive, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), T("Tutup ke System Tray", "Minimize to System Tray on close"), _cfg.CloseToTray, fBody); ly += S(48f);
 
             float halfBtn = (lw2 - S(8f)) * 0.5f;
             int glossCount = string.IsNullOrWhiteSpace(_cfg.Glossary) ? 0 : _cfg.Glossary.Split(new char[] { ';', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries).Length;
-            string glossLbl = glossCount > 0 ? ("Glosarium (" + glossCount + ")") : "Glosarium Game";
+            string glossLbl = glossCount > 0 ? (T("Glosarium (", "Glossary (") + glossCount + ")") : T("Glosarium Game", "Game Glossary");
             DrawOutlineBtn(g, pal, "BTN_GLOSSARY", SR(lx, ly, halfBtn, S(36f)), glossLbl, IconKind.Gamepad, fSmB, S(9f));
 
             // Gemini AI API Key Button
-            string gLbl = string.IsNullOrEmpty(_cfg.GeminiApiKey) ? "Gemini AI Key" : "Gemini Key Aktif";
+            string gLbl = string.IsNullOrEmpty(_cfg.GeminiApiKey) ? "Gemini AI Key" : T("Gemini Key Aktif", "Gemini Key Active");
             DrawOutlineBtn(g, pal, "BTN_GEMINI_KEY", SR(lx + halfBtn + S(8f), ly, halfBtn, S(36f)), gLbl, IconKind.Sparkle, fSmB, S(9f));
 
             List<string> packs = _engine.InstalledOcrLanguages;
-            string pStr = packs.Count > 0 ? ("WinRT OCR Lokal: " + string.Join(", ", packs.ToArray())) : "OCR: Online Fallback";
+            string pStr = packs.Count > 0 ? (T("WinRT OCR Lokal: ", "Local WinRT OCR: ") + string.Join(", ", packs.ToArray())) : "OCR: Online Fallback";
             RectangleF pb = SR(lx, left.Bottom - S(40f), lw2, S(26f));
             Theme.FillRR(g, pb, S(8f), pal.Well);
             Theme.DrawTextLeft(g, pStr, fCap, pal.TextSub, SR(pb.X + S(10f), pb.Y, pb.Width - S(20f), pb.Height));
@@ -1181,14 +1213,14 @@ namespace TranslatorLive
 
             string[,] keys = new string[,]
             {
-                { "Alt + E", "Mulai / Hentikan Live" },
-                { "Alt + Q", "Blok Layar Area OCR Baru" },
-                { "Alt + A", "Blok Layar Kotak Hasil" },
-                { "Alt + W", "Edit Semua Kotak di Layar" },
-                { "Alt + R", "Scan Ulang Sekarang" },
-                { "Alt + H", "Sembunyikan Overlay" },
-                { "F11",     "Fullscreen Penuh" },
-                { "Ctrl + / -", "Zoom In / Out Tampilan" }
+                { "Alt + E", T("Mulai / Hentikan Live", "Start / Stop Live") },
+                { "Alt + Q", T("Blok Layar Area OCR Baru", "Snip New OCR Area") },
+                { "Alt + A", T("Blok Layar Kotak Hasil", "Snip Result Box") },
+                { "Alt + W", T("Edit Semua Kotak di Layar", "Edit All Boxes on Screen") },
+                { "Alt + R", T("Scan Ulang Sekarang", "Rescan Now") },
+                { "Alt + H", T("Sembunyikan Overlay", "Toggle Hide Overlay") },
+                { "F11",     T("Fullscreen Penuh", "Toggle Fullscreen") },
+                { "Ctrl + / -", T("Zoom In / Out Tampilan", "Zoom In / Out UI") }
             };
 
             for (int i = 0; i < 8; i++)
@@ -1206,8 +1238,9 @@ namespace TranslatorLive
             RectangleF tip = SR(rx, right.Bottom - S(86f), rw2, S(70f));
             Theme.FillRR(g, tip, S(10f), pal.AccentSoft);
             Theme.DrawRR(g, tip, S(10f), Color.FromArgb(110, pal.Accent), 1f);
-            Theme.DrawTextLeft(g, "Tampil di Atas Game", fSmB, pal.AccentText, SR(tip.X + S(12f), tip.Y + S(8f), tip.Width - S(24f), S(18f)));
-            Theme.DrawTextWrap(g, "Setel Display Mode game ke Borderless Windowed atau Windowed agar overlay tampil mulus & click-through.",
+            Theme.DrawTextLeft(g, T("Tampil di Atas Game", "Display Over Games"), fSmB, pal.AccentText, SR(tip.X + S(12f), tip.Y + S(8f), tip.Width - S(24f), S(18f)));
+            Theme.DrawTextWrap(g, T("Setel Display Mode game ke Borderless Windowed atau Windowed agar overlay tampil mulus & click-through.",
+                "Set your game Display Mode to Borderless Windowed or Windowed for smooth click-through overlays."),
                 fCap, pal.Text, SR(tip.X + S(12f), tip.Y + S(28f), tip.Width - S(24f), S(36f)));
 
             cy += colH + S(16f);
@@ -1221,45 +1254,33 @@ namespace TranslatorLive
             Font fSerifLg, Font fSec, Font fBody, Font fBodyB, Font fSm, Font fSmB, Font fCap)
         {
             float cy = y;
-            Theme.DrawTextLeft(g, "Log Pembaruan", fSerifLg, pal.Text, SR(x, cy, S(280f), S(34f)));
-            Theme.DrawTextRight(g, "Dibuat oleh Danzyyy", fSmB, pal.AccentText, SR(x + w - S(200f), cy + S(6f), S(200f), S(24f)));
+            Theme.DrawTextLeft(g, T("Log Pembaruan", "Changelog"), fSerifLg, pal.Text, SR(x, cy, S(280f), S(34f)));
+            Theme.DrawTextRight(g, T("Dibuat oleh Danzyyy", "Created by Danzyyy"), fSmB, pal.AccentText, SR(x + w - S(200f), cy + S(6f), S(200f), S(24f)));
             cy += S(48f);
 
-            string[,] logs = new string[,]
-            {
-                { "v2.3", "Glosarium Nama Karakter, Speaker Badge & Bahasa Sehari-hari",
-                  "• Glosarium & Kamus Nama Karakter per game (Hyrule, Saria, Triforce, atau Istilah=Terjemahan) agar tidak diterjemahkan harfiah.\n" +
-                  "• Deteksi Nama Pembicara (Speaker Tag) otomatis tampil sebagai badge warna terpisah di atas kotak dialog.\n" +
-                  "• Peningkatan bahasa Indonesia sehari-hari yang natural & sopan (aku/kamu, hindari kata kaku seperti Anda/Mengapa/Apakah)." },
-                { "v2.2", "Terjemahan Natural, Template Game & Gaya Per-Area",
-                  "• Mesin Naturalisasi Dialog Game & Idiom (memperbaiki kalimat kaku/literal seperti 'Catch me up') + dukungan opsional Gemini AI.\n" +
-                  "• Template Profil Game: simpan & muat layout per judul game dari header atas.\n" +
-                  "• Pengaturan Tampilan Per-Area: Area Dialog & Area Pilihan kini bisa punya ukuran font, warna, dan perataan berbeda.\n" +
-                  "• Perbaikan bug tombol ESC saat blok area OCR/Hasil menggunakan Global Hotkey, serta teks UI 100% tajam native ClearType." },
-                { "v2.1", "Auto-Blank Idle & Mode Pilihan Terpisah",
-                  "• Fitur Auto Blank otomatis mengosongkan overlay saat tidak ada dialog baru.\n" +
-                  "• Mode Dialog vs Pilihan agar opsi pilihan game diterjemahkan terpisah per baris.\n" +
-                  "• Optimasi kecepatan HTTP Keep-Alive & bypass WPAD proxy untuk respons instan." },
-                { "v2.0", "Claude-Style Minimalist UI, Portable & Installer",
-                  "• Desain ulang penuh bertema hangat ala Claude AI (Dark & Light Mode), Zoom 75%-150%, Fullscreen F11.\n" +
-                  "• Blok Layar Desktop langsung untuk Area OCR dan Kotak Hasil.\n" +
-                  "• Tersedia versi Portable dan Windows Installer lengkap dengan Start Menu & Uninstaller." }
-            };
+            RectangleF card = SR(x, cy, w, S(240f));
+            Theme.DrawCard(g, pal, card, S(13f));
 
-            for (int i = 0; i < 4; i++)
-            {
-                float cardH = i <= 1 ? S(146f) : S(124f);
-                RectangleF card = SR(x, cy, w, cardH);
-                Theme.DrawCard(g, pal, card, S(13f));
+            RectangleF vPill = SR(card.X + S(18f), card.Y + S(14f), S(78f), S(24f));
+            Theme.FillRR(g, vPill, S(12f), pal.Accent);
+            Theme.DrawTextCenter(g, "v0.1 Beta", fCap, Color.White, vPill);
 
-                RectangleF vPill = SR(card.X + S(18f), card.Y + S(14f), S(54f), S(24f));
-                Theme.FillRR(g, vPill, S(12f), i == 0 ? pal.Accent : pal.Well);
-                Theme.DrawTextCenter(g, logs[i, 0], fCap, i == 0 ? Color.White : pal.TextSub, vPill);
+            string title = T("Rilis Perdana LingoLens (C# Native)", "LingoLens Initial Release (C# Native)");
+            string notes = _cfg.UiLang == "en"
+                ? "• Fast Windows WinRT OCR with online fallback & dual-area support (Dialog + line-by-line Choices).\n" +
+                  "• Polite conversational Indonesian naturalization + optional Gemini AI contextual translation.\n" +
+                  "• Game Glossary & Character Name protection + automatic Speaker Name Badge above dialog.\n" +
+                  "• Per-Area custom overlay styling, Game Profile templates, Auto-Blank idle, and ESC hotkey cancel fix.\n" +
+                  "• Bilingual UI (Indonesia / English), Dark & Light Mode, Zoom 75%-150%, Fullscreen F11, Portable & Installer."
+                : "• WinRT OCR cepat lokal + fallback online dengan mode Dual-Area (Dialog + Pilihan pisah per baris).\n" +
+                  "• Bahasa terjemahan sehari-hari yang natural & sopan + dukungan opsional Gemini AI.\n" +
+                  "• Glosarium Nama Karakter/Istilah per game + Deteksi Nama Pembicara (Speaker Badge) otomatis.\n" +
+                  "• Pengaturan tampilan Per-Area, Template Profil Game, Auto-Blank saat idle, & perbaikan ESC saat blok layar.\n" +
+                  "• Pilihan bahasa aplikasi (Indonesia / English), Dark & Light Mode, Zoom 75%-150%, Fullscreen F11, Portable & Installer.";
 
-                Theme.DrawTextLeft(g, logs[i, 1], fSec, pal.Text, SR(vPill.Right + S(12f), card.Y + S(14f), card.Width - S(104f), S(24f)));
-                Theme.DrawTextWrap(g, logs[i, 2], fSm, pal.TextSub, SR(card.X + S(18f), card.Y + S(46f), card.Width - S(36f), cardH - S(56f)));
-                cy += cardH + S(12f);
-            }
+            Theme.DrawTextLeft(g, title, fSec, pal.Text, SR(vPill.Right + S(12f), card.Y + S(14f), card.Width - S(128f), S(24f)));
+            Theme.DrawTextWrap(g, notes, fSm, pal.TextSub, SR(card.X + S(18f), card.Y + S(48f), card.Width - S(36f), card.Height - S(58f)));
+            cy += card.Height + S(16f);
 
             return cy - y;
         }
@@ -1659,6 +1680,13 @@ namespace TranslatorLive
             {
                 _cfg.Placement = int.Parse(id.Substring(6));
                 _cfg.Save(); _overlay.Rebuild(); Invalidate(); return;
+            }
+            if (id.StartsWith("UILANG_"))
+            {
+                _cfg.UiLang = id.Substring(7);
+                _cfg.Save();
+                Invalidate();
+                return;
             }
             if (id.StartsWith("ENG_"))
             {

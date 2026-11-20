@@ -40,6 +40,7 @@ Write-Host "Building LingoLens.exe..."
 & $Csc /nologo /target:winexe /platform:x64 /optimize+ `
     "/out:$OutExe" `
     "/win32icon:$IconPath" `
+    "/res:$IconPrev,LingoLensIcon.png" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
     "/r:$FwDir\System.Runtime.dll" `
     "/r:$WinMd\Windows.Foundation.winmd" `
