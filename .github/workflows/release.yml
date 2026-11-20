@@ -20,18 +20,29 @@ jobs:
         shell: powershell
         run: |
           .\build.ps1
+          $ver = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "v2.3.0" }
+          $zipPath = "dist\LingoLens-$ver-Windows-x64.zip"
+          Compress-Archive -Path "dist\LingoLens-Portable.exe", "README.md", "LICENSE" -DestinationPath $zipPath -Force
+          Push-Location dist
+          Get-FileHash "LingoLens-Portable.exe", "Setup-LingoLens.exe", "LingoLens-$ver-Windows-x64.zip" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content -Path "SHA256SUMS.txt" -Encoding ASCII
+          Pop-Location
 
-      - name: Create Release Archive Notes & Publish
+      - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           name: LingoLens ${{ github.ref_name }}
           body: |
             ### LingoLens ${{ github.ref_name }} — by Danzyyy
-            
+
             Pilih salah satu file di bawah sesuai kebutuhan:
             - **`LingoLens-Portable.exe`** — Langsung jalankan tanpa instalasi (pengaturan tersimpan di folder yang sama).
             - **`Setup-LingoLens.exe`** — Installer Windows lengkap dengan shortcut Start Menu, Desktop, dan Uninstaller.
+            - **`LingoLens-${{ github.ref_name }}-Windows-x64.zip`** — Arsip ZIP berisi versi Portable + README + LICENSE.
           files: |
             dist/LingoLens-Portable.exe
             dist/Setup-LingoLens.exe
+            dist/LingoLens-*-Windows-x64.zip
+            dist/SHA256SUMS.txt

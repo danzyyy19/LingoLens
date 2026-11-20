@@ -48,6 +48,7 @@ namespace TranslatorLive
         // Runtime only
         public string LastSource = "";
         public string LastText = "";
+        public string LastSpeaker = "";
 
         public OverlayStyle EffectiveStyle(AppConfig globalCfg)
         {
@@ -65,6 +66,8 @@ namespace TranslatorLive
         public string Engine = "google"; // "google", "mymemory", "gemini"
         public string GeminiApiKey = "";
         public bool NaturalTone = true;  // Bahasa luwes / tidak kaku (Anda -> kamu, idiom game)
+        public bool DetectSpeaker = true; // Deteksi tag nama pembicara (mis. "Saria: ...")
+        public string Glossary = "";      // Istilah/nama karakter per game (pisah ';' atau baris baru)
         public int Interval = 180;
         public int AutoHideSeconds = 8;
         public bool WaitStable = false;
@@ -239,6 +242,8 @@ namespace TranslatorLive
                     sb.AppendLine("engine=" + Engine);
                     sb.AppendLine("geminiKey=" + GeminiApiKey);
                     sb.AppendLine("natural=" + (NaturalTone ? 1 : 0));
+                    sb.AppendLine("detectSpeaker=" + (DetectSpeaker ? 1 : 0));
+                    sb.AppendLine("glossary=" + (Glossary ?? "").Replace("\r", "").Replace("\n", ";"));
                     sb.AppendLine("interval=" + Interval);
                     sb.AppendLine("autoHideSec=" + AutoHideSeconds);
                     sb.AppendLine("waitStable=" + (WaitStable ? 1 : 0));
@@ -288,6 +293,8 @@ namespace TranslatorLive
                         case "engine": c.Engine = v; break;
                         case "geminiKey": c.GeminiApiKey = v; break;
                         case "natural": c.NaturalTone = n != 0; break;
+                        case "detectSpeaker": c.DetectSpeaker = n != 0; break;
+                        case "glossary": c.Glossary = v; break;
                         case "interval": c.Interval = Math.Max(100, Math.Min(3000, n)); break;
                         case "autoHideSec": c.AutoHideSeconds = Math.Max(0, Math.Min(60, n)); break;
                         case "waitStable": c.WaitStable = n != 0; break;
@@ -370,6 +377,8 @@ namespace TranslatorLive
                 Src = loaded.Src;
                 Tgt = loaded.Tgt;
                 Engine = loaded.Engine;
+                DetectSpeaker = loaded.DetectSpeaker;
+                Glossary = loaded.Glossary;
                 Placement = loaded.Placement;
                 MergedRect = loaded.MergedRect;
                 GlobalStyle = loaded.GlobalStyle.Clone();

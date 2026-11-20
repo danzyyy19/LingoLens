@@ -293,6 +293,7 @@ namespace TranslatorLive
                 {
                     a.LastSource = e.SourceText;
                     a.LastText = e.TranslatedText;
+                    a.LastSpeaker = e.SpeakerName ?? "";
                 }
             }
 
@@ -303,7 +304,8 @@ namespace TranslatorLive
             else
             {
                 if (!string.IsNullOrEmpty(e.SourceText)) _liveSource = e.SourceText;
-                if (!string.IsNullOrEmpty(e.TranslatedText)) _liveResult = e.TranslatedText;
+                if (!string.IsNullOrEmpty(e.TranslatedText))
+                    _liveResult = string.IsNullOrEmpty(e.SpeakerName) ? e.TranslatedText : ("[" + e.SpeakerName + "] " + e.TranslatedText);
                 if (e.LatencyMs > 0) _lastMs = e.LatencyMs;
                 if (!string.IsNullOrEmpty(e.StatusMessage)) _liveStatus = e.StatusMessage;
             }
@@ -602,6 +604,60 @@ namespace TranslatorLive
                     _cfg.Save();
                     _engine.ForceScanNow();
                     ShowToast("Gemini API Key disimpan", Color.FromArgb(45, 168, 122));
+                    Invalidate();
+                }
+            }
+        }
+
+        private void PromptGlossary()
+        {
+            using (Form dlg = new Form())
+            {
+                dlg.Text = "Glosarium & Kamus Nama Karakter";
+                dlg.Size = new Size(460, 310);
+                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
+                dlg.MaximizeBox = false;
+                dlg.MinimizeBox = false;
+                dlg.StartPosition = FormStartPosition.CenterParent;
+                dlg.BackColor = _cfg.Dark ? Color.FromArgb(33, 32, 30) : Color.FromArgb(250, 249, 245);
+                dlg.ForeColor = _cfg.Dark ? Color.FromArgb(238, 236, 230) : Color.FromArgb(31, 30, 28);
+
+                Label lbl = new Label
+                {
+                    Text = "Masukkan nama karakter, lokasi, atau istilah khusus (1 per baris atau pisah ';').\nGunakan '=' untuk terjemahan khusus (contoh: Master Sword=Pedang Master):",
+                    Location = new Point(18, 14),
+                    Size = new Size(410, 36),
+                    Font = new Font("Segoe UI", 8.8f)
+                };
+                TextBox tb = new TextBox
+                {
+                    Text = (_cfg.Glossary ?? "").Replace(";", "\r\n"),
+                    Multiline = true,
+                    ScrollBars = ScrollBars.Vertical,
+                    Location = new Point(18, 56),
+                    Size = new Size(406, 154),
+                    Font = new Font("Segoe UI", 9.5f)
+                };
+                Button okBtn = new Button
+                {
+                    Text = "Simpan Glosarium",
+                    DialogResult = DialogResult.OK,
+                    Location = new Point(274, 222),
+                    Size = new Size(150, 36),
+                    BackColor = Color.FromArgb(217, 119, 87),
+                    ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
+                };
+                okBtn.FlatAppearance.BorderSize = 0;
+                dlg.Controls.Add(lbl); dlg.Controls.Add(tb); dlg.Controls.Add(okBtn);
+                if (dlg.ShowDialog(this) == DialogResult.OK)
+                {
+                    _cfg.Glossary = tb.Text.Replace("\r\n", ";").Replace("\n", ";").Trim(';', ' ');
+                    _cfg.Save();
+                    _engine.ClearState();
+                    _engine.ForceScanNow();
+                    ShowToast("Glosarium game disimpan", Color.FromArgb(45, 168, 122));
                     Invalidate();
                 }
             }
@@ -1083,7 +1139,7 @@ namespace TranslatorLive
 
             float colGap = S(14f);
             float colW = (w - colGap) * 0.5f;
-            float colH = S(506f);
+            float colH = S(556f);
 
             RectangleF left = SR(x, cy, colW, colH);
             Theme.DrawCard(g, pal, left, S(14f));
@@ -1096,16 +1152,22 @@ namespace TranslatorLive
             DrawSliderRow(g, pal, "SL_AUTOHIDE", SR(lx, ly, lw2, S(34f)), "Auto Blank", idleLabel, _cfg.AutoHideSeconds, 0, 30, fSmB);
             ly += S(48f);
 
-            DrawToggleRow(g, pal, "SYS_NATURAL", SR(lx, ly, lw2, S(38f)), "Bahasa Game Natural (Santai & Idiom)", _cfg.NaturalTone, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_NATURAL", SR(lx, ly, lw2, S(38f)), "Bahasa Sehari-hari Sopan & Natural", _cfg.NaturalTone, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_SPEAKER", SR(lx, ly, lw2, S(38f)), "Deteksi Nama Pembicara (Speaker Badge)", _cfg.DetectSpeaker, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(38f)), "Tunggu teks berhenti mengetik", _cfg.WaitStable, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(38f)), "Gabung baris (mode Dialog)", _cfg.MergeLines, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(38f)), "Sembunyikan kotak saat kosong", _cfg.HideEmpty, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(38f)), "Otomatis Live saat dibuka", _cfg.AutoLive, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), "Tutup ke System Tray", _cfg.CloseToTray, fBody); ly += S(50f);
+            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), "Tutup ke System Tray", _cfg.CloseToTray, fBody); ly += S(48f);
+
+            float halfBtn = (lw2 - S(8f)) * 0.5f;
+            int glossCount = string.IsNullOrWhiteSpace(_cfg.Glossary) ? 0 : _cfg.Glossary.Split(new char[] { ';', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries).Length;
+            string glossLbl = glossCount > 0 ? ("Glosarium (" + glossCount + ")") : "Glosarium Game";
+            DrawOutlineBtn(g, pal, "BTN_GLOSSARY", SR(lx, ly, halfBtn, S(36f)), glossLbl, IconKind.Gamepad, fSmB, S(9f));
 
             // Gemini AI API Key Button
-            string gLbl = string.IsNullOrEmpty(_cfg.GeminiApiKey) ? "Atur Gemini AI Key (Opsional)" : "Gemini AI Key Tersimpan";
-            DrawOutlineBtn(g, pal, "BTN_GEMINI_KEY", SR(lx, ly, lw2, S(36f)), gLbl, IconKind.Sparkle, fSmB, S(9f));
+            string gLbl = string.IsNullOrEmpty(_cfg.GeminiApiKey) ? "Gemini AI Key" : "Gemini Key Aktif";
+            DrawOutlineBtn(g, pal, "BTN_GEMINI_KEY", SR(lx + halfBtn + S(8f), ly, halfBtn, S(36f)), gLbl, IconKind.Sparkle, fSmB, S(9f));
 
             List<string> packs = _engine.InstalledOcrLanguages;
             string pStr = packs.Count > 0 ? ("WinRT OCR Lokal: " + string.Join(", ", packs.ToArray())) : "OCR: Online Fallback";
@@ -1165,6 +1227,10 @@ namespace TranslatorLive
 
             string[,] logs = new string[,]
             {
+                { "v2.3", "Glosarium Nama Karakter, Speaker Badge & Bahasa Sehari-hari",
+                  "• Glosarium & Kamus Nama Karakter per game (Hyrule, Saria, Triforce, atau Istilah=Terjemahan) agar tidak diterjemahkan harfiah.\n" +
+                  "• Deteksi Nama Pembicara (Speaker Tag) otomatis tampil sebagai badge warna terpisah di atas kotak dialog.\n" +
+                  "• Peningkatan bahasa Indonesia sehari-hari yang natural & sopan (aku/kamu, hindari kata kaku seperti Anda/Mengapa/Apakah)." },
                 { "v2.2", "Terjemahan Natural, Template Game & Gaya Per-Area",
                   "• Mesin Naturalisasi Dialog Game & Idiom (memperbaiki kalimat kaku/literal seperti 'Catch me up') + dukungan opsional Gemini AI.\n" +
                   "• Template Profil Game: simpan & muat layout per judul game dari header atas.\n" +
@@ -1180,9 +1246,9 @@ namespace TranslatorLive
                   "• Tersedia versi Portable dan Windows Installer lengkap dengan Start Menu & Uninstaller." }
             };
 
-            for (int i = 0; i < 3; i++)
+            for (int i = 0; i < 4; i++)
             {
-                float cardH = i == 0 ? S(156f) : S(128f);
+                float cardH = i <= 1 ? S(146f) : S(124f);
                 RectangleF card = SR(x, cy, w, cardH);
                 Theme.DrawCard(g, pal, card, S(13f));
 
@@ -1635,6 +1701,7 @@ namespace TranslatorLive
 
                 case "BTN_SAVE_PROFILE": PromptSaveGameProfile(); break;
                 case "BTN_GEMINI_KEY": PromptGeminiKey(); break;
+                case "BTN_GLOSSARY": PromptGlossary(); break;
 
                 case "ZOOM_IN": AdjustZoom(10); break;
                 case "ZOOM_OUT": AdjustZoom(-10); break;
@@ -1725,6 +1792,7 @@ namespace TranslatorLive
                 case "PICK_OUT": PickColor(2); break;
 
                 case "SYS_NATURAL": _cfg.NaturalTone = !_cfg.NaturalTone; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
+                case "SYS_SPEAKER": _cfg.DetectSpeaker = !_cfg.DetectSpeaker; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_STABLE": _cfg.WaitStable = !_cfg.WaitStable; _cfg.Save(); Invalidate(); break;
                 case "SYS_MERGE": _cfg.MergeLines = !_cfg.MergeLines; _cfg.Save(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_HIDEEMPTY": _cfg.HideEmpty = !_cfg.HideEmpty; _cfg.Save(); _overlay.UpdateTexts(); Invalidate(); break;

@@ -345,6 +345,7 @@ namespace TranslatorLive
         public bool IsOcrFrame;
         public bool EditMode;
         public string TextContent = "";
+        public string SpeakerName = "";
 
         private AppConfig _cfg;
         private readonly Action<OverlayPane> _onGeometryChanged;
@@ -480,6 +481,22 @@ namespace TranslatorLive
                         {
                             float pad = Math.Max(6f, st.Padding);
                             float topPad = EditMode ? 36f : pad;
+                            if (!string.IsNullOrEmpty(SpeakerName))
+                            {
+                                using (Font fs = Theme.UiFont(Math.Max(11f, Math.Min(14f, st.FontSize * 0.56f)), true))
+                                {
+                                    SizeF ssz = TextRenderer.MeasureText(SpeakerName, fs);
+                                    float bw = Math.Min(Width - pad * 2f, ssz.Width + 18f);
+                                    float bh = 22f;
+                                    float bx = st.Align == 1 ? Math.Max(pad, (Width - bw) * 0.5f) : (st.Align == 2 ? Math.Max(pad, Width - pad - bw) : pad);
+                                    RectangleF badge = new RectangleF(bx, topPad, bw, bh);
+                                    Theme.FillRR(g, badge, 11f, Color.FromArgb(240, 217, 119, 87));
+                                    using (StringFormat sfB = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                                    using (SolidBrush wBr = new SolidBrush(Color.White))
+                                        g.DrawString(SpeakerName, fs, wBr, badge, sfB);
+                                    topPad += bh + 4f;
+                                }
+                            }
                             RectangleF textRc = new RectangleF(pad, topPad, Math.Max(20f, Width - pad * 2f), Math.Max(20f, Height - topPad - pad));
                             DrawOverlayText(g, txt, textRc, st);
                         }
@@ -667,9 +684,18 @@ namespace TranslatorLive
                 for (int i = 0; i < _cfg.Areas.Count; i++)
                 {
                     if (_cfg.Areas[i].Enabled && string.IsNullOrEmpty(_cfg.Areas[i].LastText))
-                        _cfg.Areas[i].LastText = _cfg.Areas[i].Mode == AreaTextMode.Choice
-                            ? "• Aku belum yakin.\n• Aku ikut!"
-                            : "Kamu harus cepat. Susul aku nanti!";
+                    {
+                        if (_cfg.Areas[i].Mode == AreaTextMode.Choice)
+                        {
+                            _cfg.Areas[i].LastSpeaker = "";
+                            _cfg.Areas[i].LastText = "• Aku belum yakin.\n• Aku ikut!";
+                        }
+                        else
+                        {
+                            _cfg.Areas[i].LastSpeaker = _cfg.DetectSpeaker ? "Saria" : "";
+                            _cfg.Areas[i].LastText = "Kamu harus cepat. Susul aku nanti!";
+                        }
+                    }
                 }
             }
             Rebuild();
@@ -697,6 +723,7 @@ namespace TranslatorLive
                 Area a = _cfg.FindArea(p.AreaId);
                 if (a == null) continue;
                 p.TextContent = a.LastText ?? "";
+                p.SpeakerName = a.LastSpeaker ?? "";
                 bool show = EditMode || (a.Enabled && !(_cfg.HideEmpty && string.IsNullOrEmpty(p.TextContent)));
                 if (show) { if (!p.Visible) p.Show(); p.Render(_cfg); p.KeepTopmost(); }
                 else if (p.Visible) p.Hide();

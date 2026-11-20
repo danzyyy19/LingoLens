@@ -21,6 +21,7 @@ namespace TranslatorLive
     public class ScanUpdateEventArgs : EventArgs
     {
         public int AreaId;
+        public string SpeakerName;
         public string SourceText;
         public string TranslatedText;
         public int LatencyMs;
@@ -126,7 +127,7 @@ namespace TranslatorLive
             try { if (_worker != null && _worker.IsAlive) _worker.Join(800); } catch { }
         }
 
-        private void RaiseResult(int areaId, string src, string trans, int ms, string status, bool err, bool idleCleared = false)
+        private void RaiseResult(int areaId, string src, string trans, int ms, string status, bool err, bool idleCleared = false, string speaker = "")
         {
             EventHandler<ScanUpdateEventArgs> h = OnAreaTranslated;
             if (h != null)
@@ -134,6 +135,7 @@ namespace TranslatorLive
                 h(this, new ScanUpdateEventArgs
                 {
                     AreaId = areaId,
+                    SpeakerName = speaker ?? "",
                     SourceText = src ?? "",
                     TranslatedText = trans ?? "",
                     LatencyMs = ms,
@@ -149,17 +151,19 @@ namespace TranslatorLive
             string lastSrc = "";
             string lastTgt = "";
             string lastEngine = "";
+            string lastGlossary = "";
             bool lastMerge = true;
             bool lastNat = true;
+            bool lastSpeaker = true;
 
             while (!_stop)
             {
                 if (!_running || _pausedForEdit) { Thread.Sleep(50); continue; }
 
                 List<Area> snapshot = new List<Area>();
-                string srcLang, tgtLang, engineName, geminiKey;
+                string srcLang, tgtLang, engineName, geminiKey, glossary;
                 int intervalMs, autoHideSec;
-                bool waitStable, mergeLines, naturalTone;
+                bool waitStable, mergeLines, naturalTone, detectSpeaker;
 
                 lock (_cfg.Sync)
                 {
@@ -167,7 +171,9 @@ namespace TranslatorLive
                     tgtLang = _cfg.Tgt;
                     engineName = _cfg.Engine;
                     geminiKey = _cfg.GeminiApiKey;
+                    glossary = _cfg.Glossary ?? "";
                     naturalTone = _cfg.NaturalTone;
+                    detectSpeaker = _cfg.DetectSpeaker;
                     intervalMs = Math.Max(100, Math.Min(3000, _cfg.Interval));
                     autoHideSec = Math.Max(0, _cfg.AutoHideSeconds);
                     waitStable = _cfg.WaitStable;
@@ -181,11 +187,13 @@ namespace TranslatorLive
                 if (snapshot.Count == 0) { Thread.Sleep(120); continue; }
 
                 bool configChanged = (srcLang != lastSrc) || (tgtLang != lastTgt) ||
-                                     (engineName != lastEngine) || (mergeLines != lastMerge) || (naturalTone != lastNat);
+                                     (engineName != lastEngine) || (mergeLines != lastMerge) ||
+                                     (naturalTone != lastNat) || (glossary != lastGlossary) || (detectSpeaker != lastSpeaker);
                 if (configChanged)
                 {
                     ClearState();
-                    lastSrc = srcLang; lastTgt = tgtLang; lastEngine = engineName; lastMerge = mergeLines; lastNat = naturalTone;
+                    lastSrc = srcLang; lastTgt = tgtLang; lastEngine = engineName;
+                    lastMerge = mergeLines; lastNat = naturalTone; lastGlossary = glossary; lastSpeaker = detectSpeaker;
                 }
 
                 bool forced = _forceScan || configChanged;
@@ -207,7 +215,7 @@ namespace TranslatorLive
                         continue;
                     }
 
-                    ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, naturalTone, waitStable, mergeLines, autoHideSec, forced);
+                    ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, naturalTone, detectSpeaker, waitStable, mergeLines, autoHideSec, forced);
                 }
 
                 int slept = 0;
@@ -219,8 +227,8 @@ namespace TranslatorLive
             }
         }
 
-        private void ProcessArea(Area area, string srcLang, string tgtLang, string engineName, string geminiKey,
-            bool naturalTone, bool waitStable, bool mergeLines, int autoHideSec, bool forced)
+        private void ProcessArea(Area area, string srcLang, string tgtLang, string engineName, string geminiKey, string glossary,
+            bool naturalTone, bool detectSpeaker, bool waitStable, bool mergeLines, int autoHideSec, bool forced)
         {
             if (area.Ocr.Width < 12 || area.Ocr.Height < 10) return;
 
@@ -307,14 +315,19 @@ namespace TranslatorLive
                     }
                 }
 
+                string speakerName = "";
+                string textToTranslate = cleanText;
+                if (detectSpeaker && !treatAsChoice)
+                    textToTranslate = ExtractSpeakerTag(cleanText, out speakerName);
+
                 string transErr, usedProvider, translated;
                 if (treatAsChoice)
                 {
-                    translated = TranslateChoicesLineByLine(cleanText, srcLang, tgtLang, engineName, geminiKey, naturalTone, out usedProvider, out transErr);
+                    translated = TranslateChoicesLineByLine(textToTranslate, srcLang, tgtLang, engineName, geminiKey, naturalTone, out usedProvider, out transErr, glossary);
                 }
                 else
                 {
-                    translated = TranslateText(cleanText, srcLang, tgtLang, engineName, geminiKey, naturalTone, out usedProvider, out transErr);
+                    translated = TranslateText(textToTranslate, srcLang, tgtLang, engineName, geminiKey, naturalTone, out usedProvider, out transErr, glossary);
                 }
                 sw.Stop();
 
@@ -329,8 +342,8 @@ namespace TranslatorLive
                 _lastActiveUtc[area.Id] = DateTime.UtcNow;
                 _idleHidden[area.Id] = false;
 
-                string tag = (treatAsChoice ? "Pilihan · " : "") + usedProvider + " · " + sw.ElapsedMilliseconds + " ms";
-                RaiseResult(area.Id, cleanText, translated, (int)sw.ElapsedMilliseconds, tag, false);
+                string tag = (treatAsChoice ? "Pilihan · " : (!string.IsNullOrEmpty(speakerName) ? (speakerName + " · ") : "")) + usedProvider + " · " + sw.ElapsedMilliseconds + " ms";
+                RaiseResult(area.Id, cleanText, translated, (int)sw.ElapsedMilliseconds, tag, false, false, speakerName);
             }
             finally
             {
@@ -354,15 +367,103 @@ namespace TranslatorLive
         }
 
         // =====================================================================
-        // NATURAL GAME DIALOGUE & IDIOM ENGINE (Fixes "Catch me up" -> "Susul aku", "Anda" -> "kamu")
+        // SPEAKER TAG EXTRACTION + GLOSSARY PROTECTION + NATURAL INDONESIAN
         // =====================================================================
+        public static string ExtractSpeakerTag(string text, out string speaker)
+        {
+            speaker = "";
+            if (string.IsNullOrWhiteSpace(text)) return text;
+            string s = text.Trim();
+
+            // [Saria] Dialog...
+            Match mBracket = Regex.Match(s, @"^\[([A-Za-z0-9 '\-]{2,24})\]\s*(.+)$", RegexOptions.Singleline);
+            if (mBracket.Success && mBracket.Groups[2].Value.Trim().Length > 0)
+            {
+                speaker = mBracket.Groups[1].Value.Trim();
+                return mBracket.Groups[2].Value.Trim();
+            }
+
+            // Saria: Dialog...
+            Match mColon = Regex.Match(s, @"^([A-Z\p{Lu}][A-Za-z0-9 '\-]{1,20}):\s+(.+)$", RegexOptions.Singleline);
+            if (mColon.Success && mColon.Groups[2].Value.Trim().Length > 0)
+            {
+                string cand = mColon.Groups[1].Value.Trim();
+                if (!cand.Equals("http", StringComparison.OrdinalIgnoreCase) && !cand.Equals("https", StringComparison.OrdinalIgnoreCase))
+                {
+                    speaker = cand;
+                    return mColon.Groups[2].Value.Trim();
+                }
+            }
+
+            // Two-line: "Saria\nYou should hurry..."
+            int nl = s.IndexOf('\n');
+            if (nl > 1 && nl < 22)
+            {
+                string first = s.Substring(0, nl).Trim();
+                string rest = s.Substring(nl + 1).Trim();
+                if (first.Length >= 2 && first.Length <= 20 && char.IsUpper(first[0]) &&
+                    !first.Contains(".") && !first.Contains("!") && !first.Contains("?") && !first.Contains(",") &&
+                    first.Split(' ').Length <= 2 && rest.Length > first.Length)
+                {
+                    speaker = first;
+                    return rest;
+                }
+            }
+
+            return s;
+        }
+
+        private class GlossaryEntry
+        {
+            public string Source;
+            public string Target;
+            public string Token;
+        }
+
+        private static List<GlossaryEntry> ParseGlossary(string glossary)
+        {
+            List<GlossaryEntry> list = new List<GlossaryEntry>();
+            if (string.IsNullOrWhiteSpace(glossary)) return list;
+            string[] parts = glossary.Replace("\r\n", "\n").Split(new char[] { ';', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries);
+            int idx = 0;
+            foreach (string raw in parts)
+            {
+                string p = raw.Trim();
+                if (p.Length < 2) continue;
+                int eq = p.IndexOf('=');
+                string src = eq > 0 ? p.Substring(0, eq).Trim() : p;
+                string tgt = eq > 0 ? p.Substring(eq + 1).Trim() : p;
+                if (string.IsNullOrEmpty(src) || string.IsNullOrEmpty(tgt)) continue;
+                list.Add(new GlossaryEntry { Source = src, Target = tgt, Token = "ZXLLG" + (idx++) + "XZ" });
+            }
+            list.Sort(delegate (GlossaryEntry a, GlossaryEntry b) { return b.Source.Length.CompareTo(a.Source.Length); });
+            return list;
+        }
+
+        private static string ProtectGlossary(string text, List<GlossaryEntry> entries)
+        {
+            if (entries == null || entries.Count == 0 || string.IsNullOrEmpty(text)) return text;
+            string s = text;
+            foreach (GlossaryEntry e in entries)
+                s = Regex.Replace(s, @"\b" + Regex.Escape(e.Source) + @"\b", e.Token, RegexOptions.IgnoreCase);
+            return s;
+        }
+
+        private static string RestoreGlossary(string text, List<GlossaryEntry> entries)
+        {
+            if (entries == null || entries.Count == 0 || string.IsNullOrEmpty(text)) return text;
+            string s = text;
+            foreach (GlossaryEntry e in entries)
+                s = Regex.Replace(s, Regex.Escape(e.Token), e.Target, RegexOptions.IgnoreCase);
+            return s;
+        }
+
         private static string PreProcessGameIdioms(string text, string srcLang, string tgtLang, bool naturalTone)
         {
             if (!naturalTone || tgtLang != "id") return text;
             if (srcLang != "en" && srcLang != "auto") return text;
 
             string s = text;
-            // Fix common English game dialogue idioms that machine translators butcher literally:
             s = Regex.Replace(s, @"\b[Cc]atch me up\b", "follow and meet me");
             s = Regex.Replace(s, @"\b[Cc]atch up with me\b", "follow and meet me");
             s = Regex.Replace(s, @"\b[Cc]atch up later\b", "meet up later");
@@ -380,20 +481,38 @@ namespace TranslatorLive
 
             string s = translated;
 
-            // Fix literal idiom leftovers if any slipped through
+            // Fix literal idiom leftovers
             s = Regex.Replace(s, @"\b[Tt]angkap aku nanti\b", "Susul aku nanti");
             s = Regex.Replace(s, @"\b[Tt]angkap saya nanti\b", "Susul aku nanti");
             s = Regex.Replace(s, @"\b[Mm]engejarku nanti\b", "menyusulku nanti");
             s = Regex.Replace(s, @"\bikuti dan temui aku\b", "susul aku", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\bikuti dan temui saya\b", "susul aku", RegexOptions.IgnoreCase);
 
-            // Natural conversational pronouns for RPG / Adventure / VN games (instead of stiff "Anda / Saya")
+            // Everyday polite conversational Indonesian (natural, not stiff/formal)
             s = Regex.Replace(s, @"\bAnda\b", "Kamu");
             s = Regex.Replace(s, @"\banda\b", "kamu");
             s = Regex.Replace(s, @"\bSaya\b", "Aku");
             s = Regex.Replace(s, @"\bsaya\b", "aku");
+            s = Regex.Replace(s, @"\bApakah\b", "Apa");
+            s = Regex.Replace(s, @"\bapakah\b", "apa");
+            s = Regex.Replace(s, @"\bMengapa\b", "Kenapa");
+            s = Regex.Replace(s, @"\bmengapa\b", "kenapa");
+            s = Regex.Replace(s, @"\bBagaimana\b", "Gimana");
+            s = Regex.Replace(s, @"\bbagaimana\b", "gimana");
+            s = Regex.Replace(s, @"\b[Bb]ergegaslah\b", "cepatlah");
+            s = Regex.Replace(s, @"\b[Bb]ergegas\b", "cepat");
+            s = Regex.Replace(s, @"\bAkan tetapi\b", "Tapi");
+            s = Regex.Replace(s, @"\bakan tetapi\b", "tapi");
+            s = Regex.Replace(s, @"\bTetapi\b", "Tapi");
+            s = Regex.Replace(s, @"\btetapi\b", "tapi");
+            s = Regex.Replace(s, @"\bNamun\b", "Tapi");
+            s = Regex.Replace(s, @"\bOleh karena itu\b", "Jadi");
+            s = Regex.Replace(s, @"\boleh karena itu\b", "jadi");
+            s = Regex.Replace(s, @"\b[Tt]erima kasih banyak\b", "makasih banyak");
+            s = Regex.Replace(s, @"\b[Ss]aat ini\b", "sekarang");
+            s = Regex.Replace(s, @"\b[Dd]apatkah\b", "bisakah");
 
-            // Fix awkward lowercase after period
+            // Fix capitalization after punctuation or start of string
             s = Regex.Replace(s, @"([\.\!\?]\s+)([a-z])", m => m.Groups[1].Value + m.Groups[2].Value.ToUpperInvariant());
             if (s.Length > 0 && char.IsLower(s[0]))
                 s = char.ToUpperInvariant(s[0]) + s.Substring(1);
@@ -735,18 +854,18 @@ namespace TranslatorLive
         }
 
         public string TranslateChoicesLineByLine(string multilineChoices, string srcLang, string tgtLang,
-            string preferredEngine, string geminiKey, bool naturalTone, out string usedProvider, out string error)
+            string preferredEngine, string geminiKey, bool naturalTone, out string usedProvider, out string error, string glossary = "")
         {
             usedProvider = preferredEngine;
             error = "";
             string[] lines = multilineChoices.Split('\n');
             if (lines.Length == 1)
             {
-                string single = TranslateText(lines[0], srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error);
+                string single = TranslateText(lines[0], srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error, glossary);
                 return string.IsNullOrEmpty(single) ? "" : ("• " + single);
             }
 
-            string batchResult = TranslateText(multilineChoices, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error);
+            string batchResult = TranslateText(multilineChoices, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error, glossary);
             if (!string.IsNullOrEmpty(batchResult))
             {
                 string[] outLines = batchResult.Replace("\r\n", "\n").Split('\n');
@@ -767,20 +886,20 @@ namespace TranslatorLive
             {
                 string trimmed = ln.Trim();
                 if (string.IsNullOrEmpty(trimmed)) continue;
-                string tr = TranslateText(trimmed, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error);
+                string tr = TranslateText(trimmed, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error, glossary);
                 if (!string.IsNullOrEmpty(tr)) results.Add("• " + tr.Trim());
             }
             return string.Join("\n", results.ToArray());
         }
 
         public string TranslateText(string text, string srcLang, string tgtLang,
-            string preferredEngine, string geminiKey, bool naturalTone, out string usedProvider, out string error)
+            string preferredEngine, string geminiKey, bool naturalTone, out string usedProvider, out string error, string glossary = "")
         {
             usedProvider = preferredEngine == "mymemory" ? "MyMemory" : (preferredEngine == "gemini" ? "Gemini AI" : "Google");
             error = "";
             if (string.IsNullOrWhiteSpace(text)) return "";
 
-            string cacheKey = preferredEngine + "|" + (naturalTone ? "N" : "L") + "|" + srcLang + "|" + tgtLang + "|" + text;
+            string cacheKey = preferredEngine + "|" + (naturalTone ? "N" : "L") + "|" + srcLang + "|" + tgtLang + "|" + (glossary ?? "") + "|" + text;
             lock (_cacheLock)
             {
                 string hit;
@@ -791,12 +910,14 @@ namespace TranslatorLive
                 }
             }
 
-            string prepped = PreProcessGameIdioms(text, srcLang, tgtLang, naturalTone);
+            List<GlossaryEntry> glossEntries = ParseGlossary(glossary);
+            string protectedText = ProtectGlossary(text, glossEntries);
+            string prepped = PreProcessGameIdioms(protectedText, srcLang, tgtLang, naturalTone);
             string result = "";
 
             if (preferredEngine == "gemini" && !string.IsNullOrWhiteSpace(geminiKey))
             {
-                result = CallGemini(text, tgtLang, geminiKey, naturalTone, out error);
+                result = CallGemini(text, tgtLang, geminiKey, naturalTone, glossary, out error);
                 if (!string.IsNullOrEmpty(result)) usedProvider = "Gemini AI";
             }
 
@@ -814,6 +935,7 @@ namespace TranslatorLive
                     if (!string.IsNullOrEmpty(result)) usedProvider = "Google";
                     else { result = CallMyMemory(prepped, srcLang, tgtLang, out error); if (!string.IsNullOrEmpty(result)) { usedProvider = "MyMemory"; error = ""; } }
                 }
+                result = RestoreGlossary(result, glossEntries);
                 result = NaturalizeIndonesian(result, tgtLang, naturalTone);
             }
 
@@ -828,14 +950,15 @@ namespace TranslatorLive
             return result;
         }
 
-        private static string CallGemini(string text, string tgtLang, string apiKey, bool naturalTone, out string error)
+        private static string CallGemini(string text, string tgtLang, string apiKey, bool naturalTone, string glossary, out string error)
         {
             error = "";
             try
             {
                 string langName = tgtLang == "id" ? "Indonesian" : (tgtLang == "ms" ? "Malay" : tgtLang);
-                string style = naturalTone ? "natural conversational casual RPG game dialogue (use kamu/aku, avoid stiff literal translations)" : "accurate natural translation";
-                string prompt = "Translate this game text into " + langName + " using " + style + ". Return ONLY the translated text, preserving line breaks:\n" + text;
+                string style = naturalTone ? "polite everyday conversational RPG dialogue (natural, friendly, use aku/kamu, avoid stiff formal words like Anda/saya/mengapa/apakah)" : "accurate natural translation";
+                string glossNote = string.IsNullOrWhiteSpace(glossary) ? "" : (" Keep/apply these game glossary terms: " + glossary.Replace("\r", "").Replace("\n", "; ") + ".");
+                string prompt = "Translate this game text into " + langName + " using " + style + "." + glossNote + " Return ONLY the translated text, preserving line breaks:\n" + text;
                 string escaped = prompt.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
                 string body = "{\"contents\":[{\"parts\":[{\"text\":\"" + escaped + "\"}]}]}";
                 string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + Uri.EscapeDataString(apiKey.Trim());

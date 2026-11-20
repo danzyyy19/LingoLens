@@ -76,13 +76,28 @@ namespace TranslatorLive
                             return 1;
                         }
 
-                        // Test Natural Idiom / Conversational Tone
-                        string idiomSrc = "You should hurry. Catch me up later!";
-                        string idiomTr = eng.TranslateText(idiomSrc, "en", "id", "google", "", true, out prov, out terr);
-                        Console.WriteLine("[TRANS-IDIOM] '" + idiomTr + "' (" + prov + ")");
-                        if (string.IsNullOrEmpty(idiomTr) || idiomTr.ToLowerInvariant().Contains("tangkap aku"))
+                        // Test Natural Idiom / Polite Everyday Tone + Speaker Tag + Glossary
+                        string speakerTest;
+                        string bodyOnly = TranslationEngine.ExtractSpeakerTag("Saria: You should hurry. Catch me up later!", out speakerTest);
+                        Console.WriteLine("[SPEAKER] '" + speakerTest + "' -> '" + bodyOnly + "'");
+                        if (speakerTest != "Saria" || !bodyOnly.Contains("hurry"))
                         {
-                            Console.WriteLine("[FAIL] Idiom naturalization failed.");
+                            Console.WriteLine("[FAIL] Speaker tag extraction failed.");
+                            return 1;
+                        }
+                        string idiomTr = eng.TranslateText(bodyOnly, "en", "id", "google", "", true, out prov, out terr, "Hyrule;Saria;Triforce");
+                        Console.WriteLine("[TRANS-IDIOM] '" + idiomTr + "' (" + prov + ")");
+                        if (string.IsNullOrEmpty(idiomTr) || idiomTr.ToLowerInvariant().Contains("tangkap aku") || idiomTr.ToLowerInvariant().Contains("anda"))
+                        {
+                            Console.WriteLine("[FAIL] Idiom / polite everyday naturalization failed.");
+                            return 1;
+                        }
+
+                        string glossTr = eng.TranslateText("Protect the Triforce in Hyrule!", "en", "id", "google", "", true, out prov, out terr, "Hyrule;Triforce");
+                        Console.WriteLine("[GLOSSARY] '" + glossTr + "'");
+                        if (!glossTr.Contains("Triforce") || !glossTr.Contains("Hyrule"))
+                        {
+                            Console.WriteLine("[FAIL] Glossary term protection failed.");
                             return 1;
                         }
 

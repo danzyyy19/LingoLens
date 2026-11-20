@@ -41,7 +41,9 @@ Unduh versi siap pakai melalui halaman [**GitHub Releases**](https://github.com/
 
 - **WinRT OCR Cepat & Akurat** — Memanfaatkan OCR bawaan Windows 10/11 secara *in-process* (ditambah fallback OCR online untuk bahasa yang belum terpasang).
 - **Mode Dual-Area (Dialog & Pilihan)** — Pisahkan Area 1 untuk kotak dialog dan Area 2 untuk opsi pilihan game agar pilihan diterjemahkan rapi per baris tanpa tercampur menjadi satu kalimat.
-- **Terjemahan Natural & Opsi Gemini AI** — Pra-pemrosesan idiom game dan gaya bahasa santai (`NaturalTone`) agar hasil terjemahan tidak kaku, dengan dukungan **Google Translate**, **MyMemory**, serta opsional **Gemini AI**.
+- **Terjemahan Natural Sehari-hari & Opsi Gemini AI** — Pra-pemrosesan idiom game dan gaya bahasa Indonesia sehari-hari yang sopan (`NaturalTone`) agar hasil tidak kaku, dengan dukungan **Google Translate**, **MyMemory**, serta opsional **Gemini AI**.
+- **Glosarium & Kamus Nama Karakter** — Lindungi nama karakter, lokasi, atau istilah khusus per game (mis. *Hyrule*, *Saria*, *Triforce*, atau `Master Sword=Pedang Master`) agar tidak diterjemahkan secara harfiah.
+- **Deteksi Nama Pembicara (Speaker Badge)** — Memisahkan otomatis tag nama pembicara (mis. `Saria:`) dan menampilkannya sebagai badge warna tersendiri di atas kotak dialog.
 - **Pengaturan Tampilan Per-Area** — Atur font, ukuran teks, perataan, warna, opasitas, outline, dan *Auto-Fit* secara independen untuk setiap area (mis. teks Pilihan lebih kecil daripada Dialog).
 - **Profil / Template per Judul Game** — Simpan dan muat ulang posisi area OCR, kotak hasil, serta gaya overlay berdasarkan judul game.
 - **UI Minimalis Dark & Light Mode** — Desain bersih dengan rendering teks native Windows ClearType, Zoom 75%–150%, Fullscreen (`F11`), dan System Tray.
