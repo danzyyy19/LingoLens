@@ -73,9 +73,7 @@ Unduh versi siap pakai melalui halaman [**GitHub Releases**](https://github.com/
 Tidak perlu Visual Studio atau .NET SDK — cukup gunakan compiler `csc.exe` bawaan Windows via PowerShell:
 
 ```powershell
-git clone https://github.com/danzyyy19/LingoLens.git
-cd LingoLens
-powershell -ExecutionPolicy Bypass -File .\build.ps1
+
 ```
 
 Hasil build akan otomatis dibuat di folder `dist/`:
