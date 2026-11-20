@@ -1,0 +1,19 @@
+# Build outputs & binaries
+dist/
+bin/
+obj/
+
+# User configs, logs & temporary test outputs
+*.ini
+*.log
+*.user
+*.suo
+*.png
+!assets/icon_preview.png
+profiles/
+
+# IDE & OS
+.vs/
+.vscode/
+Thumbs.db
+Desktop.ini

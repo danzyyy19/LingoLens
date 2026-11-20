@@ -1,0 +1,37 @@
+name: Build & Release LingoLens
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Portable & Installer
+        shell: powershell
+        run: |
+          .\build.ps1
+
+      - name: Create Release Archive Notes & Publish
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: LingoLens ${{ github.ref_name }}
+          body: |
+            ### LingoLens ${{ github.ref_name }} — by Danzyyy
+            
+            Pilih salah satu file di bawah sesuai kebutuhan:
+            - **`LingoLens-Portable.exe`** — Langsung jalankan tanpa instalasi (pengaturan tersimpan di folder yang sama).
+            - **`Setup-LingoLens.exe`** — Installer Windows lengkap dengan shortcut Start Menu, Desktop, dan Uninstaller.
+          files: |
+            dist/LingoLens-Portable.exe
+            dist/Setup-LingoLens.exe
