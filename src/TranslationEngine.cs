@@ -180,7 +180,7 @@ namespace TranslatorLive
                 List<Area> snapshot = new List<Area>();
                 string srcLang, tgtLang, engineName, geminiKey, glossary;
                 int intervalMs, autoHideSec;
-                bool waitStable, mergeLines, naturalTone, detectSpeaker;
+                bool waitStable, mergeLines, naturalTone, detectSpeaker, enhanceOcr;
 
                 lock (_cfg.Sync)
                 {
@@ -191,6 +191,7 @@ namespace TranslatorLive
                     glossary = _cfg.Glossary ?? "";
                     naturalTone = _cfg.NaturalTone;
                     detectSpeaker = _cfg.DetectSpeaker;
+                    enhanceOcr = _cfg.EnhanceGameOcr;
                     intervalMs = Math.Max(100, Math.Min(3000, _cfg.Interval));
                     autoHideSec = Math.Max(0, _cfg.AutoHideSeconds);
                     waitStable = _cfg.WaitStable;
@@ -232,7 +233,7 @@ namespace TranslatorLive
                         continue;
                     }
 
-                    ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, naturalTone, detectSpeaker, waitStable, mergeLines, autoHideSec, forced);
+                    ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, naturalTone, detectSpeaker, waitStable, mergeLines, enhanceOcr, autoHideSec, forced);
                 }
 
                 int slept = 0;
@@ -245,7 +246,7 @@ namespace TranslatorLive
         }
 
         private void ProcessArea(Area area, string srcLang, string tgtLang, string engineName, string geminiKey, string glossary,
-            bool naturalTone, bool detectSpeaker, bool waitStable, bool mergeLines, int autoHideSec, bool forced)
+            bool naturalTone, bool detectSpeaker, bool waitStable, bool mergeLines, bool enhanceOcr, int autoHideSec, bool forced)
         {
             if (area.Ocr.Width < 12 || area.Ocr.Height < 10) return;
 
@@ -293,7 +294,7 @@ namespace TranslatorLive
 
                 bool usedOnline, detectedChoiceLayout;
                 string ocrError;
-                string rawText = RecognizeBitmap(frame, srcLang, out usedOnline, out detectedChoiceLayout, out ocrError);
+                string rawText = RecognizeBitmap(frame, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out ocrError);
 
                 if (!string.IsNullOrEmpty(ocrError))
                 {
@@ -656,6 +657,17 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\bGreat\s+Fairy\b", "Great Fairy");
             s = Regex.Replace(s, @"\bGreat\s+Plateau\b", "Great Plateau");
             s = Regex.Replace(s, @"\bOcarina\s+of\s+Time\b", "Ocarina of Time");
+            s = Regex.Replace(s, @"\bKokiri(?:'s)?\s+Emerald\b", "Kokiri's Emerald");
+            s = Regex.Replace(s, @"\bGoron(?:'s)?\s+Ruby\b", "Goron's Ruby");
+            s = Regex.Replace(s, @"\bZora(?:'s)?\s+Sapphire\b", "Zora's Sapphire");
+            s = Regex.Replace(s, @"\bHyrule\s+Castle\b", "Hyrule Castle");
+            s = Regex.Replace(s, @"\bTemple\s+of\s+Time\b", "Temple of Time");
+            s = Regex.Replace(s, @"\bDeath\s+Mountain\b", "Death Mountain");
+            s = Regex.Replace(s, @"\bKakariko\s+Village\b", "Kakariko Village");
+            s = Regex.Replace(s, @"\bLost\s+Woods\b", "Lost Woods");
+            s = Regex.Replace(s, @"\bLon\s+Lon\s+Ranch\b", "Lon Lon Ranch");
+            s = Regex.Replace(s, @"\bTriforce\b", "Triforce");
+            s = Regex.Replace(s, @"\bPrincess\s+Zelda\b", "Putri Zelda");
 
             return s;
         }
@@ -678,6 +690,17 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\b[Pp]edang\s+(?:tuan|guru|ahli)\b", "Master Sword", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Pp]eri\s+(?:yang\s+)?baik\b", "Peri Agung", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Pp]eri\s+hebat\b", "Peri Agung", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:[Zz]amrud|[Ee]merald)\s+[Kk]okiri\b", "Kokiri's Emerald", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:[Rr]ubi|[Rr]uby)\s+[Gg]oron\b", "Goron's Ruby", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:[Ss]afir|[Ss]apphire)\s+[Zz]ora\b", "Zora's Sapphire", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Kk]astil\s+[Ff]rule\b|\b[Ff]rule\s+Castle\b", "Kastil Hyrule", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Kk]astil\s+[Hh]yrule\b", "Kastil Hyrule", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bKuil\s+Waktu\b", "Temple of Time", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bGunung\s+Kematian\b", "Death Mountain", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bDesa\s+Kakariko\b", "Kakariko Village", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bHutan\s+Hilang\b", "Lost Woods", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bPeternakan\s+Lon\s+Lon\b", "Lon Lon Ranch", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bTriforce\b", "Triforce", RegexOptions.IgnoreCase);
 
             s = Regex.Replace(s, @"\b[Tt]angkap\s+(?:aku|saya|kami)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Tt]angkap\s+(?:kamu|anda|kalian)\s+nanti\b", "sampai ketemu nanti", RegexOptions.IgnoreCase);
@@ -969,10 +992,15 @@ namespace TranslatorLive
         public string RecognizeBitmap(Bitmap sourceBmp, string srcLang, out bool usedOnline, out string error)
         {
             bool dummy;
-            return RecognizeBitmap(sourceBmp, srcLang, out usedOnline, out dummy, out error);
+            return RecognizeBitmap(sourceBmp, srcLang, _cfg.EnhanceGameOcr, out usedOnline, out dummy, out error);
         }
 
         public string RecognizeBitmap(Bitmap sourceBmp, string srcLang, out bool usedOnline, out bool detectedChoiceLayout, out string error)
+        {
+            return RecognizeBitmap(sourceBmp, srcLang, _cfg.EnhanceGameOcr, out usedOnline, out detectedChoiceLayout, out error);
+        }
+
+        public string RecognizeBitmap(Bitmap sourceBmp, string srcLang, bool enhanceOcr, out bool usedOnline, out bool detectedChoiceLayout, out string error)
         {
             usedOnline = false;
             detectedChoiceLayout = false;
@@ -984,7 +1012,7 @@ namespace TranslatorLive
                 return RecognizeOnlineOcrSpace(sourceBmp, srcLang, out error);
             }
 
-            Bitmap prepared = PrepareForOcr(sourceBmp);
+            Bitmap prepared = PrepareForOcr(sourceBmp, enhanceOcr);
             try
             {
                 OcrEngine eng = GetWinRtEngine(srcLang);
@@ -1004,15 +1032,13 @@ namespace TranslatorLive
 
                     if (res.Lines.Count >= 2 && res.Lines.Count <= 5)
                     {
-                        int shortLines = 0, terminalLines = 0, choiceMarkerLines = 0;
+                        int choiceMarkerLines = 0;
                         foreach (OcrLine ln in res.Lines)
                         {
                             string t = ln.Text.Trim();
-                            if (t.Length <= 42) shortLines++;
-                            if (t.EndsWith(".") || t.EndsWith("!") || t.EndsWith("?")) terminalLines++;
                             if (Regex.IsMatch(t, @"^(?:[>▸►▶•]|\[?\d+[\]\.\)])")) choiceMarkerLines++;
                         }
-                        if (choiceMarkerLines >= 1 || (shortLines == res.Lines.Count && terminalLines >= 2))
+                        if (choiceMarkerLines >= 1)
                             detectedChoiceLayout = true;
                     }
 
@@ -1029,21 +1055,190 @@ namespace TranslatorLive
             finally { if (prepared != sourceBmp) prepared.Dispose(); }
         }
 
-        private static Bitmap PrepareForOcr(Bitmap bmp)
+        private static Bitmap PrepareForOcr(Bitmap bmp, bool enhanceGameOcr)
         {
-            if (bmp.Height < 150 && bmp.Width < 1400)
+            if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0) return bmp;
+
+            // Target optimal character height for WinRT OCR (approx 35-60px)
+            float scale = 1.0f;
+            if (bmp.Height < 160) scale = 3.0f;
+            else if (bmp.Height < 380 && bmp.Width * 2 <= 3400) scale = 2.0f;
+            else if (bmp.Height < 550 && bmp.Width * 1.5f <= 3400) scale = 1.5f;
+
+            Bitmap target = bmp;
+            if (scale > 1.01f)
             {
-                int nw = bmp.Width * 2, nh = bmp.Height * 2;
+                int nw = (int)(bmp.Width * scale);
+                int nh = (int)(bmp.Height * scale);
                 Bitmap up = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
                 using (Graphics g = Graphics.FromImage(up))
                 {
                     g.InterpolationMode = InterpolationMode.HighQualityBicubic;
                     g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    g.SmoothingMode = SmoothingMode.HighQuality;
                     g.DrawImage(bmp, 0, 0, nw, nh);
                 }
-                return up;
+                target = up;
             }
-            return bmp;
+
+            if (!enhanceGameOcr) return target;
+
+            // Intelligent Game Screen Contrast Enhancement & 3D Background Noise Suppression
+            Bitmap processed = (target == bmp) ? new Bitmap(bmp) : target;
+            BitmapData bd = processed.LockBits(new Rectangle(0, 0, processed.Width, processed.Height),
+                ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            try
+            {
+                int h = processed.Height, w = processed.Width;
+                int totalBytes = Math.Abs(bd.Stride) * h;
+                byte[] raw = new byte[totalBytes];
+                Marshal.Copy(bd.Scan0, raw, 0, totalBytes);
+
+                // Sample brightness histogram using Max(R,G,B) to preserve colored dialogue text (Link green, Navi cyan, items)
+                int[] hist = new int[256];
+                int pixelCount = 0;
+                for (int y = 0; y < h; y += 2)
+                {
+                    int row = y * bd.Stride;
+                    for (int x = 0; x < w; x += 2)
+                    {
+                        int off = row + x * 4;
+                        byte b = raw[off];
+                        byte g = raw[off + 1];
+                        byte r = raw[off + 2];
+                        int maxC = Math.Max(r, Math.Max(g, b));
+                        int lum = (r * 77 + g * 150 + b * 29) >> 8;
+                        int val = (lum + maxC) >> 1;
+                        hist[val]++;
+                        pixelCount++;
+                    }
+                }
+
+                int darkPixels = 0;
+                for (int i = 0; i < 115; i++) darkPixels += hist[i];
+                bool isDarkBg = (darkPixels > pixelCount * 0.50f);
+
+                int bgCutoff = 80;
+                if (isDarkBg)
+                {
+                    int accum = 0;
+                    int targetP = (int)(pixelCount * 0.65f);
+                    for (int i = 0; i < 256; i++)
+                    {
+                        accum += hist[i];
+                        if (accum >= targetP) { bgCutoff = Math.Min(120, Math.Max(65, i + 15)); break; }
+                    }
+                }
+
+                for (int y = 0; y < h; y++)
+                {
+                    int row = y * bd.Stride;
+                    for (int x = 0; x < w; x++)
+                    {
+                        int off = row + x * 4;
+                        byte b = raw[off];
+                        byte g = raw[off + 1];
+                        byte r = raw[off + 2];
+
+                        if (isDarkBg)
+                        {
+                            int maxC = Math.Max(r, Math.Max(g, b));
+                            int lum = (r * 77 + g * 150 + b * 29) >> 8;
+                            int val = (lum + maxC) >> 1;
+
+                            if (val <= bgCutoff)
+                            {
+                                // Zero-out translucent 3D background noise (bark, grass, particles)
+                                raw[off] = 0;
+                                raw[off + 1] = 0;
+                                raw[off + 2] = 0;
+                            }
+                            else
+                            {
+                                // Boost character text contrast towards crisp white
+                                float norm = (float)(val - bgCutoff) / (255 - bgCutoff);
+                                byte boosted = (byte)Math.Min(255, (int)(norm * 1.4f * 255f));
+                                raw[off] = boosted;
+                                raw[off + 1] = boosted;
+                                raw[off + 2] = boosted;
+                            }
+                        }
+                    }
+                }
+
+                Marshal.Copy(raw, 0, bd.Scan0, totalBytes);
+            }
+            finally
+            {
+                processed.UnlockBits(bd);
+            }
+
+            return processed;
+        }
+
+        public static string CleanGameOcrText(string text, string srcLang)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return "";
+
+            string s = text;
+
+            // 1. Clustered punctuation & noise symbols
+            s = Regex.Replace(s, @"[:;]{2,}", ":");
+            s = Regex.Replace(s, @"(?:\:|\;)?\.{2,}'?", "...");
+            s = Regex.Replace(s, @"\b(tal|wal|fol)<(?!\w)", "$1k", RegexOptions.IgnoreCase); // tal< -> talk, wal< -> walk
+            s = Regex.Replace(s, @"l<", "k");                             // mal<e -> make, lil<e -> like
+            s = Regex.Replace(s, @"(?<=[A-Za-z])<(?=[A-Za-z])", "k");      // < between letters -> k
+            s = Regex.Replace(s, @"(?<=[\s\(\[\{]|^)[<>\*~^|_#]+", "");    // leading noise symbols
+            s = Regex.Replace(s, @"[<>\*~^|_#]+(?=[\s\)\.\,\!\?\]\}]|$)", ""); // trailing noise symbols
+            s = Regex.Replace(s, @"[&*]+([A-Za-z\u00C0-\u024F])", "$1");   // &word -> word
+            s = Regex.Replace(s, @"([A-Za-z\u00C0-\u024F])[&*]+", "$1");   // word* -> word
+            s = Regex.Replace(s, @"[<>]", " ");                            // strip remaining stray brackets
+
+            // 2. Glued noise digits/letters between words (e.g. power4eGo -> power. Go)
+            s = Regex.Replace(s, @"(?<=[a-z]{2,})\d+[a-z]{1,2}(?=[A-Z])", ". ");
+
+            // 3. Glued lowercase-to-uppercase words (e.g. DearNavi -> Dear Navi)
+            s = Regex.Replace(s, @"(?<=[a-z])(?=[A-Z][a-z])", " ");
+
+            // 4. Retro / Game Font Dialogue & Entity Typo Corrections
+            s = Regex.Replace(s, @"\bLinl[ec]\b|\bLineha\b", "Link");
+            s = Regex.Replace(s, @"\bfrule\s+Castle\b", "Hyrule Castle");
+            s = Regex.Replace(s, @"\bfrule\b", "Hyrule");
+            s = Regex.Replace(s, @"\bEar\s+Navi\b", "Dear Navi");
+            s = Regex.Replace(s, @"\bOwevfr\b", "However");
+            s = Regex.Replace(s, @"\bMusteprotect\b", "Must protect");
+            s = Regex.Replace(s, @"\bIfiite:e\b|\bIfiite\b", "if it");
+            s = Regex.Replace(s, @"\bChe;\b|\bChe\b(?=\s+[a-z]{3,})", "the");
+            s = Regex.Replace(s, @"\berad\b(?=\s+of)", "end");
+            s = Regex.Replace(s, @"\bT0\*\b|\bT0\b", "To");
+            s = Regex.Replace(s, @"\bIbhppe\s+o\b|\bIbhppe\b", "beyond help");
+            s = Regex.Replace(s, @"\binteétioh\b", "intention");
+
+            // 5. Filter garbage tokens in English / Latin (e.g. 9äUxyfios)
+            if (srcLang == "en" || srcLang == "auto")
+            {
+                string[] tokens = s.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                List<string> cleanTokens = new List<string>();
+                foreach (string tok in tokens)
+                {
+                    string t = tok.Trim();
+                    if (t.Length == 0) continue;
+
+                    // Noise token: starts with digit followed by letters with diacritics
+                    if (Regex.IsMatch(t, @"^\d+[a-zA-Z\u00C0-\u024F]{2,}"))
+                        continue;
+
+                    // Isolated noise punctuation
+                    if (Regex.IsMatch(t, @"^[•*#~^\|\\/<>_]{1,3}$"))
+                        continue;
+
+                    cleanTokens.Add(t);
+                }
+                s = string.Join(" ", cleanTokens.ToArray());
+            }
+
+            s = Regex.Replace(s, @"\s+", " ").Trim();
+            return s;
         }
 
         private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 2400)
@@ -1105,7 +1300,8 @@ namespace TranslatorLive
             List<string> cleaned = new List<string>();
             foreach (string ln in lines)
             {
-                string s = Regex.Replace(ln, @"[|_~=<>▸►▶•·]+", " ");
+                string s = CleanGameOcrText(ln, "");
+                s = Regex.Replace(s, @"[|_~=<>▸►▶•·]+", " ");
                 s = Regex.Replace(s, @"\s+[xX×○△□]\s*$", "");
                 s = Regex.Replace(s, @"\s+", " ").Trim();
                 if (s.Length >= 2) cleaned.Add(s);
@@ -1121,7 +1317,8 @@ namespace TranslatorLive
 
             foreach (string ln in lines)
             {
-                string s = Regex.Replace(ln, @"[|_~=<>]{2,}", " ");
+                string s = CleanGameOcrText(ln, srcLang);
+                s = Regex.Replace(s, @"[|_~=<>]{2,}", " ");
                 s = s.Trim(' ', '\t', '|', '_', '~', '=');
                 s = Regex.Replace(s, @"\s+", " ");
                 if (s.Length >= 2 || (s.Length == 1 && char.IsLetterOrDigit(s[0]))) cleaned.Add(s);

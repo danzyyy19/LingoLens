@@ -124,6 +124,16 @@ namespace TranslatorLive
                             return 1;
                         }
 
+                        // Test Game OCR Cleaning & Typo Restoration
+                        string dirtySample = "The man I spoke of<, dreams each night, Linle... my 9äUxyfios exhausted... mal<e your way to frule Castle.";
+                        string cleanedSample = TranslationEngine.CleanGameOcrText(dirtySample, "en");
+                        LogTest("[CLEAN-GAME-OCR] " + cleanedSample);
+                        if (!cleanedSample.Contains("Link") || !cleanedSample.Contains("Hyrule Castle") || !cleanedSample.Contains("make") || cleanedSample.Contains("9äUxyfios"))
+                        {
+                            LogTest("[FAIL] CleanGameOcrText failed: " + cleanedSample);
+                            return 1;
+                        }
+
                         // Direct verification of Indonesian everyday naturalization rules
                         string testStiff1 = TranslationEngine.NaturalizeIndonesian("Tangkap saya nanti. Saya punya ini.", "id", true);
                         string testStiff2 = TranslationEngine.NaturalizeIndonesian("Apakah Anda tidak bisa melakukannya? Jangan khawatir, tentu saja!", "id", true);
@@ -235,6 +245,11 @@ namespace TranslatorLive
                     w.SetPreviewState(2, false); w.Refresh();
                     SaveShot(w, Path.Combine(outDir, "minimalist_light_system.png"));
                     if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_light_system.png"));
+
+                    // Dark Mode Changelog Tab
+                    w.SetPreviewState(3, true); w.Refresh();
+                    SaveShot(w, Path.Combine(outDir, "minimalist_dark_changelog.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_dark_changelog.png"));
 
                     w.Close();
                 }

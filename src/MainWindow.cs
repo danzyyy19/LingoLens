@@ -1557,7 +1557,7 @@ namespace TranslatorLive
             float colGap = S(14f);
             bool twoCol = (w >= S(620f));
             float colW = twoCol ? (w - colGap) * 0.5f : w;
-            float colH = S(640f);
+            float colH = S(684f);
 
             RectangleF left = SR(x, cy, colW, colH);
             Theme.DrawCard(g, pal, left, S(16f));
@@ -1593,6 +1593,7 @@ namespace TranslatorLive
             DrawSliderRow(g, pal, "SL_AUTOHIDE", SR(lx, ly, lw2, S(34f)), "Auto Blank", idleLabel, _cfg.AutoHideSeconds, 0, 30, fSmB);
             ly += S(48f);
 
+            DrawToggleRow(g, pal, "SYS_ENHANCE_OCR", SR(lx, ly, lw2, S(38f)), T("Penjernih Teks Game & Kontras OCR", "Game Text Clarity & OCR Contrast"), _cfg.EnhanceGameOcr, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_NATURAL", SR(lx, ly, lw2, S(38f)), T("Bahasa Sehari-hari Sopan & Natural", "Natural Conversational Tone"), _cfg.NaturalTone, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_SPEAKER", SR(lx, ly, lw2, S(38f)), T("Deteksi Nama Pembicara (Speaker Badge)", "Detect Speaker Name (Speaker Badge)"), _cfg.DetectSpeaker, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(38f)), T("Tunggu teks berhenti mengetik", "Wait for typing animation to finish"), _cfg.WaitStable, fBody); ly += S(44f);
@@ -1742,25 +1743,27 @@ namespace TranslatorLive
             cy += chkH + S(16f);
 
             // Card v0.2 Beta
-            RectangleF card2 = SR(x, cy, w, S(250f));
+            RectangleF card2 = SR(x, cy, w, S(280f));
             Theme.DrawCard(g, pal, card2, S(16f));
 
             RectangleF vPill2 = SR(card2.X + S(18f), card2.Y + S(14f), S(78f), S(24f));
             Theme.FillRR(g, vPill2, S(12f), pal.Accent);
             Theme.DrawTextCenter(g, "v0.2 Beta", fCap, pal.AccentBtnText, vPill2);
 
-            string title2 = T("Pembaruan Ikon Modern, Anti-Flicker & Optimasi Respon", "Modern Geometric Icons, Anti-Flicker & Speed Optimization");
+            string title2 = T("Pembaruan Ikon Modern, Penjernih OCR Game & Anti-Flicker", "Modern Geometric Icons, Game OCR Clarity & Anti-Flicker");
             string notes2 = _cfg.UiLang == "en"
                 ? "• Redesigned modern geometric vector icons across the entire UI with informative hover tooltips.\n" +
+                  "• Smart Game OCR Engine: dynamic upscale & background noise zeroing eliminates garbled characters from 3D scenes.\n" +
+                  "• Game Text Sanitizer: fixes retro game font misreads (Link, Hyrule, Navi) and strips noise tokens.\n" +
                   "• Faster translation responsiveness: background HTTPS/TLS pre-warming and optimized network timeouts.\n" +
                   "• Smart Anti-Flicker stabilization: core text normalization ignores punctuation jitter and prevents meaning flip-flopping.\n" +
-                  "• Game Typewriter Debounce: waits for character-by-character dialogue to finish before translating.\n" +
-                  "• 3D game background tolerance increased to prevent unnecessary OCR triggers on dynamic visuals."
+                  "• Game Typewriter Debounce: waits for character-by-character dialogue to finish before translating."
                 : "• Desain ikon vektor geometris modern dan profesional dengan tooltip informatif saat kursor diarahkan.\n" +
+                  "• Mesin OCR Game Cerdas: penjernih teks dinamis menyingkirkan noise background 3D game & mempertajam font karakter.\n" +
+                  "• Game Text Sanitizer: memperbaiki salah baca font game retro (Link, Hyrule, Navi) & membuang karakter sampah.\n" +
                   "• Respon terjemahan lebih kencang dengan pre-warming koneksi HTTPS/TLS di latar belakang & optimasi timeout.\n" +
                   "• Stabilisasi Cerdas Anti-Flicker: normalisasi teks inti mengabaikan tanda baca & mencegah arti berganti-ganti.\n" +
-                  "• Debounce Efek Mesin Ketik Game: menunggu kalimat selesai diketik sebelum diterjemahkan secara utuh.\n" +
-                  "• Peningkatan toleransi background game 3D agar animasi latar dinamis tidak memicu OCR berulang.";
+                  "• Debounce Efek Mesin Ketik Game: menunggu kalimat selesai diketik sebelum diterjemahkan secara utuh.";
 
             Theme.DrawTextLeft(g, title2, fSec, pal.Text, SR(vPill2.Right + S(12f), card2.Y + S(14f), card2.Width - S(128f), S(24f)));
             Theme.DrawTextWrap(g, notes2, fSm, pal.TextSub, SR(card2.X + S(18f), card2.Y + S(48f), card2.Width - S(36f), card2.Height - S(58f)));
@@ -2267,6 +2270,9 @@ namespace TranslatorLive
                 case "SL_AUTOHIDE":
                     return T("Geser untuk mengatur waktu otomatis menyembunyikan overlay saat tidak ada teks", "Drag to adjust idle timeout before auto-hiding overlay");
 
+                case "SYS_ENHANCE_OCR":
+                    return T("Penjernih Teks Game: Bersihkan background 3D, pertajam warna font karakter & hilangkan karakter aneh", "Game OCR Enhancer: Clean 3D background noise, boost character font contrast & eliminate garbled characters");
+
                 case "SYS_NATURAL":
                     return T("Gunakan gaya bahasa santai sehari-hari yang luwes & natural (hindari kata kaku/robot)", "Use natural polite everyday gaming tone (avoids stiff robotic translations)");
 
@@ -2574,6 +2580,7 @@ namespace TranslatorLive
                 case "PICK_OUT": PickColor(2); break;
                 case "PICK_SPEAKER": PickColor(3); break;
 
+                case "SYS_ENHANCE_OCR": _cfg.EnhanceGameOcr = !_cfg.EnhanceGameOcr; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_NATURAL": _cfg.NaturalTone = !_cfg.NaturalTone; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_SPEAKER": _cfg.DetectSpeaker = !_cfg.DetectSpeaker; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_STABLE": _cfg.WaitStable = !_cfg.WaitStable; _cfg.Save(); Invalidate(); break;
