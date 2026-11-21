@@ -1094,16 +1094,6 @@ namespace TranslatorLive
             }
         }
 
-        private class OcrLineInfo
-        {
-            public string Text;
-            public double Top;
-            public double Bottom;
-            public double AvgHeight;
-            public int ValidWordCount;
-            public bool IsChoiceMarker;
-        }
-
         private static string RunWinRtOcrSinglePass(OcrEngine eng, Bitmap bmp, string srcLang, out bool detectedChoiceLayout)
         {
             detectedChoiceLayout = false;
@@ -1122,39 +1112,31 @@ namespace TranslatorLive
                 OcrResult res = AwaitWinRt(eng.RecognizeAsync(sb));
                 if (res == null || res.Lines == null || res.Lines.Count == 0) return "";
 
-                List<OcrLineInfo> candidates = new List<OcrLineInfo>();
-                double primaryFontHeight = 0;
-                int maxWordsInLine = -1;
+                List<string> validLines = new List<string>();
+                int choiceMarkerLines = 0;
 
                 foreach (OcrLine ln in res.Lines)
                 {
                     if (ln.Words == null || ln.Words.Count == 0) continue;
 
-                    double sumH = 0, minTop = double.MaxValue, maxBot = 0;
                     int validWords = 0;
                     List<string> keptWords = new List<string>();
 
                     for (int wi = 0; wi < ln.Words.Count; wi++)
                     {
                         OcrWord ow = ln.Words[wi];
-                        Rect r = ow.BoundingRect;
                         string wt = (ow.Text ?? "").Trim();
                         if (wt.Length == 0) continue;
 
                         bool wordValid = IsPlausibleOcrWord(wt, isCjk);
-                        // Strip detached 1-2 char 3D-background margin ghosts at start/end of line
-                        if (!wordValid && (wi == 0 || wi == ln.Words.Count - 1) && ln.Words.Count > 1)
+                        // Strip 1-2 char 3D-background margin ghosts at start/end of line
+                        if (!wordValid && (wi == 0 || wi == ln.Words.Count - 1) && ln.Words.Count > 1 && wt.Length <= 2 &&
+                            !Regex.IsMatch(wt, @"^[>▸►▶•\d\[\]\.\)\!\?""'“”]+$"))
                         {
-                            Rect neighbor = (wi == 0) ? ln.Words[1].BoundingRect : ln.Words[ln.Words.Count - 2].BoundingRect;
-                            double gap = (wi == 0) ? (neighbor.X - (r.X + r.Width)) : (r.X - (neighbor.X + neighbor.Width));
-                            if (gap > r.Height * 1.8 || r.Height < neighbor.Height * 0.55)
-                                continue;
+                            continue;
                         }
 
                         keptWords.Add(wt);
-                        sumH += r.Height;
-                        if (r.Y < minTop) minTop = r.Y;
-                        if (r.Y + r.Height > maxBot) maxBot = r.Y + r.Height;
                         if (wordValid) validWords++;
                     }
 
@@ -1165,51 +1147,15 @@ namespace TranslatorLive
                     // Reject background 3D ghost lines that contain zero valid words
                     if (validWords == 0 && !isMarker) continue;
 
-                    double avgH = sumH / keptWords.Count;
-                    candidates.Add(new OcrLineInfo
-                    {
-                        Text = lineTxt,
-                        Top = minTop,
-                        Bottom = maxBot,
-                        AvgHeight = avgH,
-                        ValidWordCount = validWords,
-                        IsChoiceMarker = isMarker
-                    });
-
-                    if (validWords > maxWordsInLine || (validWords == maxWordsInLine && avgH > primaryFontHeight))
-                    {
-                        maxWordsInLine = validWords;
-                        primaryFontHeight = avgH;
-                    }
+                    validLines.Add(lineTxt);
+                    if (isMarker) choiceMarkerLines++;
                 }
 
-                if (candidates.Count == 0) return "";
-
-                // Filter out lines whose font height differs wildly from primary subtitle font (e.g. tiny HUD or giant 3D background shapes)
-                List<OcrLineInfo> filtered = new List<OcrLineInfo>();
-                int choiceMarkerLines = 0;
-                foreach (OcrLineInfo info in candidates)
-                {
-                    if (primaryFontHeight > 8 && candidates.Count > 1)
-                    {
-                        if (info.AvgHeight < primaryFontHeight * 0.45 || info.AvgHeight > primaryFontHeight * 2.35)
-                            continue;
-                    }
-                    filtered.Add(info);
-                    if (info.IsChoiceMarker) choiceMarkerLines++;
-                }
-
-                if (filtered.Count == 0) return "";
-                if (filtered.Count >= 2 && filtered.Count <= 5 && choiceMarkerLines >= 1)
+                if (validLines.Count == 0) return "";
+                if (validLines.Count >= 2 && validLines.Count <= 5 && choiceMarkerLines >= 1)
                     detectedChoiceLayout = true;
 
-                StringBuilder sbTxt = new StringBuilder();
-                for (int i = 0; i < filtered.Count; i++)
-                {
-                    if (i > 0) sbTxt.Append('\n');
-                    sbTxt.Append(filtered[i].Text);
-                }
-                return sbTxt.ToString();
+                return string.Join("\n", validLines.ToArray());
             }
         }
 
