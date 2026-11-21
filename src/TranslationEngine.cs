@@ -1118,17 +1118,9 @@ namespace TranslatorLive
                 for (int i = 0; i < 115; i++) darkPixels += hist[i];
                 bool isDarkBg = (darkPixels > pixelCount * 0.50f);
 
-                int bgCutoff = 80;
-                if (isDarkBg)
-                {
-                    int accum = 0;
-                    int targetP = (int)(pixelCount * 0.65f);
-                    for (int i = 0; i < 256; i++)
-                    {
-                        accum += hist[i];
-                        if (accum >= targetP) { bgCutoff = Math.Min(120, Math.Max(65, i + 15)); break; }
-                    }
-                }
+                // Otsu's optimal mathematical thresholding
+                int otsu = CalculateOtsuThreshold(hist, pixelCount);
+                int bgCutoff = isDarkBg ? Math.Min(125, Math.Max(50, otsu)) : Math.Max(130, Math.Min(200, otsu));
 
                 for (int y = 0; y < h; y++)
                 {
@@ -1140,12 +1132,12 @@ namespace TranslatorLive
                         byte g = raw[off + 1];
                         byte r = raw[off + 2];
 
+                        int maxC = Math.Max(r, Math.Max(g, b));
+                        int lum = (r * 77 + g * 150 + b * 29) >> 8;
+                        int val = (lum + maxC) >> 1;
+
                         if (isDarkBg)
                         {
-                            int maxC = Math.Max(r, Math.Max(g, b));
-                            int lum = (r * 77 + g * 150 + b * 29) >> 8;
-                            int val = (lum + maxC) >> 1;
-
                             if (val <= bgCutoff)
                             {
                                 // Zero-out translucent 3D background noise (bark, grass, particles)
@@ -1156,11 +1148,31 @@ namespace TranslatorLive
                             else
                             {
                                 // Boost character text contrast towards crisp white
-                                float norm = (float)(val - bgCutoff) / (255 - bgCutoff);
+                                float norm = (float)(val - bgCutoff) / Math.Max(1, 255 - bgCutoff);
                                 byte boosted = (byte)Math.Min(255, (int)(norm * 1.4f * 255f));
                                 raw[off] = boosted;
                                 raw[off + 1] = boosted;
                                 raw[off + 2] = boosted;
+                            }
+                        }
+                        else
+                        {
+                            // Light background games (speech bubbles, parchment paper)
+                            if (val >= bgCutoff)
+                            {
+                                // Clean background to pure white
+                                raw[off] = 255;
+                                raw[off + 1] = 255;
+                                raw[off + 2] = 255;
+                            }
+                            else
+                            {
+                                // Boost dark text towards crisp black
+                                float norm = (float)val / Math.Max(1, bgCutoff);
+                                byte darkened = (byte)Math.Max(0, (int)(norm * 0.7f * 255f));
+                                raw[off] = darkened;
+                                raw[off + 1] = darkened;
+                                raw[off + 2] = darkened;
                             }
                         }
                     }
@@ -1174,6 +1186,39 @@ namespace TranslatorLive
             }
 
             return processed;
+        }
+
+        public static int CalculateOtsuThreshold(int[] hist, int totalPixels)
+        {
+            if (totalPixels <= 0 || hist == null || hist.Length < 256) return 80;
+
+            float sum = 0;
+            for (int i = 0; i < 256; i++) sum += i * hist[i];
+
+            float sumB = 0;
+            int wB = 0;
+            float varMax = 0;
+            int threshold = 80;
+
+            for (int t = 0; t < 256; t++)
+            {
+                wB += hist[t];
+                if (wB == 0) continue;
+                int wF = totalPixels - wB;
+                if (wF == 0) break;
+
+                sumB += (float)(t * hist[t]);
+                float mB = sumB / wB;
+                float mF = (sum - sumB) / wF;
+
+                float varBetween = (float)wB * (float)wF * (mB - mF) * (mB - mF);
+                if (varBetween > varMax)
+                {
+                    varMax = varBetween;
+                    threshold = t;
+                }
+            }
+            return threshold;
         }
 
         public static string CleanGameOcrText(string text, string srcLang)
@@ -1235,10 +1280,33 @@ namespace TranslatorLive
                     cleanTokens.Add(t);
                 }
                 s = string.Join(" ", cleanTokens.ToArray());
+
+                // 6. Universal Diacritic Normalization for English/Latin text
+                s = RemoveDiacritics(s);
+                // Strip single stray consonants at sentence boundaries (e.g. "protect t.")
+                s = Regex.Replace(s, @"\b([a-zA-Z]{3,})\s+[b-df-hj-np-tv-zB-DF-HJ-NP-TV-Z](?=[\.\,\!\?]|\s*$)", "$1");
             }
 
             s = Regex.Replace(s, @"\s+", " ").Trim();
             return s;
+        }
+
+        public static string RemoveDiacritics(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+            try
+            {
+                string normalized = text.Normalize(NormalizationForm.FormD);
+                StringBuilder sb = new StringBuilder();
+                foreach (char c in normalized)
+                {
+                    var uc = System.Globalization.CharUnicodeInfo.GetUnicodeCategory(c);
+                    if (uc != System.Globalization.UnicodeCategory.NonSpacingMark)
+                        sb.Append(c);
+                }
+                return sb.ToString().Normalize(NormalizationForm.FormC);
+            }
+            catch { return text; }
         }
 
         private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 2400)
