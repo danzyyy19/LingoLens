@@ -10,6 +10,7 @@ obj/
 *.suo
 *.png
 !assets/icon_preview.png
+!assets/preview.png
 profiles/
 
 # IDE & OS
