@@ -1,73 +1,104 @@
 <div align="center">
 
----
+<img src="assets/icon_preview.png" alt="LingoLens Logo" width="110" />
 
-## Tentang LingoLens
+# LingoLens
 
-**LingoLens** adalah aplikasi penerjemah layar *real-time* ringan untuk Windows yang dirancang khusus untuk bermain game (RPG, Visual Novel, JRPG, dll.) maupun membaca teks di layar secara langsung. Teks diambil secara instan menggunakan **Windows WinRT OCR** dan ditampilkan di atas game dalam bentuk overlay yang bersih, tidak mengganggu gameplay (*click-through*), dan dapat dikustomisasi per area.
+**Penerjemah Layar Game & Teks Real-Time untuk Windows (Native C#)**  
+*Cepat, ringan, akurat, tanpa Python atau runtime tambahan.*
 
-> Aplikasi ini **100% native C#** (.NET Framework 4.8 bawaan Windows) — **tidak membutuhkan Python, runtime tambahan, atau hak Administrator.**
+[![Release](https://img.shields.io/badge/release-v0.2--beta-d97757?style=flat-square)](https://github.com/danzyyy19/LingoLens/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-blue?style=flat-square)](https://github.com/danzyyy19/LingoLens/releases/latest)
+[![Framework](https://img.shields.io/badge/.NET-4.8%20Native%20C%23-purple?style=flat-square)](https://github.com/danzyyy19/LingoLens)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Author](https://img.shields.io/badge/by-Danzyyy-orange?style=flat-square)](https://github.com/danzyyy19)
 
----
+<br/>
 
-## Download
+[**Download Terbaru**](https://github.com/danzyyy19/LingoLens/releases/latest) • [**Fitur Utama**](#-fitur-utama) • [**Tangkapan Layar**](#-tangkapan-layar) • [**Cara Pakai**](#-cara-pakai) • [**Build dari Source**](#-build-dari-source)
 
-Unduh versi siap pakai melalui halaman [**GitHub Releases**](https://github.com/danzyyy19/LingoLens/releases/latest):
+<br/>
 
-| Versi               | File                       | Keterangan                                                                     |
-| :------------------ | :------------------------- | :----------------------------------------------------------------------------- |
-| **Portable**  | `LingoLens-Portable.exe` | Langsung jalankan tanpa install; konfigurasi & profil game tersimpan portabel. |
-| **Installer** | `Setup-LingoLens.exe`    | Pasang ke Windows dengan shortcut Start Menu, Desktop, dan Uninstaller.        |
+<img src="assets/preview.png" alt="LingoLens UI Preview" width="850" />
 
----
-
-## Fitur Utama
-
-- **WinRT OCR Cepat & Akurat** — Memanfaatkan OCR bawaan Windows 10/11 secara *in-process* (ditambah fallback OCR online untuk bahasa yang belum terpasang).
-- **Mode Dual-Area (Dialog & Pilihan)** — Pisahkan Area 1 untuk kotak dialog dan Area 2 untuk opsi pilihan game agar pilihan diterjemahkan rapi per baris tanpa tercampur menjadi satu kalimat.
-- **Terjemahan Natural Sehari-hari & Opsi Gemini AI** — Pra-pemrosesan idiom game dan gaya bahasa Indonesia sehari-hari yang sopan (`NaturalTone`) agar hasil tidak kaku, dengan dukungan **Google Translate**, **MyMemory**, serta opsional **Gemini AI**.
-- **Glosarium & Kamus Nama Karakter** — Lindungi nama karakter, lokasi, atau istilah khusus per game (mis. *Hyrule*, *Saria*, *Triforce*, atau `Master Sword=Pedang Master`) agar tidak diterjemahkan secara harfiah.
-- **Deteksi Nama Pembicara (Speaker Badge)** — Memisahkan otomatis tag nama pembicara (mis. `Saria:`) dan menampilkannya sebagai badge warna tersendiri di atas kotak dialog.
-- **Pengaturan Tampilan Per-Area** — Atur font, ukuran teks, perataan, warna, opasitas, outline, dan *Auto-Fit* secara independen untuk setiap area (mis. teks Pilihan lebih kecil daripada Dialog).
-- **Profil / Template per Judul Game** — Simpan dan muat ulang posisi area OCR, kotak hasil, serta gaya overlay berdasarkan judul game.
-- **UI Minimalis Dark & Light Mode** — Desain bersih dengan rendering teks native Windows ClearType, Zoom 75%–150%, Fullscreen (`F11`), dan System Tray.
-- **Auto-Blank Idle** — Overlay otomatis menghilang saat tidak ada dialog baru agar layar tetap bersih.
+</div>
 
 ---
 
-## Cara Pakai
+## 📖 Tentang LingoLens
 
-1. Jalankan **`LingoLens-Portable.exe`** (atau install lewat **`Setup-LingoLens.exe`**).
-2. Buka game kamu dalam mode **Borderless Windowed** atau **Windowed**.
-3. Klik **`Blok Area OCR`** (`Alt+Q`) untuk menandai area teks asli pada layar, lalu **`Blok Kotak Hasil`** (`Alt+A`) untuk menentukan posisi & ukuran hasil terjemahan. *(Tekan `ESC` kapan saja untuk membatalkan).*
-4. Tekan **`Mulai Live`** (`Alt+E`) dan mainkan game seperti biasa.
-5. Gunakan tombol **`Simpan`** di bar atas untuk menyimpan template profil berdasarkan judul game.
+**LingoLens** adalah aplikasi penerjemah layar *real-time* ringan untuk Windows yang dirancang khusus untuk bermain game (RPG, Visual Novel, JRPG, petualangan, dll.) maupun membaca teks di layar secara langsung. Teks diambil secara instan menggunakan **Windows WinRT OCR** dan ditampilkan di atas game dalam bentuk overlay yang bersih, tembus klik (*click-through*), dan dapat dikustomisasi secara bebas per area.
 
-### Pintasan Keyboard (Global Hotkey)
-
-- `Alt + E` — Mulai / Hentikan Live Translation
-- `Alt + Q` — Blok Area OCR di layar
-- `Alt + A` — Blok Kotak Hasil di layar
-- `Alt + W` — Mode Edit / Geser Kotak langsung di atas layar
-- `F11` — Fullscreen jendela aplikasi
+> ⚡ **100% Native C# (.NET Framework 4.8 bawaan Windows)** — Tidak membutuhkan instalasi Python, runtime berat, atau hak akses Administrator. Langsung *plug-and-play*.
 
 ---
 
-## Build dari Source
+## 📥 Download
 
-Tidak perlu Visual Studio atau .NET SDK — cukup gunakan compiler `csc.exe` bawaan Windows via PowerShell:
+Unduh versi siap pakai melalui halaman resmi [**GitHub Releases**](https://github.com/danzyyy19/LingoLens/releases/latest):
+
+| Versi | File Unduhan | Keterangan |
+| :--- | :--- | :--- |
+| **Portable** | [**`LingoLens-Portable.exe`**](https://github.com/danzyyy19/LingoLens/releases/latest/download/LingoLens-Portable.exe) | Langsung jalan tanpa install; konfigurasi & profil game tersimpan mandiri di folder yang sama. |
+| **Installer** | [**`Setup-LingoLens.exe`**](https://github.com/danzyyy19/LingoLens/releases/latest/download/Setup-LingoLens.exe) | Pasang ke Windows dengan shortcut Start Menu, Desktop, dan Uninstaller lengkap. |
+| **ZIP Paket** | [**`LingoLens-v0.2-beta-Windows-x64.zip`**](https://github.com/danzyyy19/LingoLens/releases/latest) | Paket arsip berisi Portable + README + Lisensi. |
+
+---
+
+## ✨ Fitur Utama
+
+- 🔍 **WinRT OCR Cepat & Akurat** — Memanfaatkan mesin OCR bawaan Windows 10/11 secara *in-process* (sangat cepat ~30-50ms) ditambah *fallback OCR online* untuk bahasa yang paket bahasanya belum terinstal di Windows.
+- 🔀 **Mode Dual-Area (Dialog & Pilihan)** — Pisahkan Area 1 untuk kotak teks dialog dan Area 2 untuk opsi pilihan respon game, sehingga opsi pilihan diterjemahkan rapi per baris (*line-by-line*) tanpa tercampur menjadi satu kalimat berantakan.
+- 💬 **Terjemahan Natural Sehari-hari & Opsi Gemini AI** — Dilengkapi pra-pemrosesan ekspresi/idiom game dan gaya bahasa Indonesia santai yang luwes dan sopan (`NaturalTone`) agar hasil tidak kaku seperti robot, dengan dukungan **Google Translate**, **MyMemory**, serta opsional **Gemini AI**.
+- 🛡️ **Glosarium & Kamus Nama Karakter** — Lindungi nama karakter, lokasi, atau istilah khusus game (misal: *Hyrule*, *Saria*, *Triforce*, atau `Master Sword=Pedang Master`) agar tidak diterjemahkan secara salah/harfiah.
+- 🏷️ **Deteksi Nama Pembicara (*Speaker Badge*)** — Memisahkan otomatis tag nama karakter pembicara (misal: `Saria:`) dan menampilkannya sebagai badge warna tersendiri di atas kotak dialog.
+- 🎨 **Pengaturan Tampilan Per-Area** — Atur font, ukuran huruf, perataan, warna, transparansi, outline, dan *Auto-Fit* secara independen untuk setiap area.
+- 🎮 **Profil / Template per Judul Game** — Simpan dan muat ulang posisi area OCR, kotak hasil, serta gaya tampilan overlay berdasarkan judul game yang sedang dimainkan.
+- 🌓 **UI Minimalis Dark & Light Mode** — Tampilan modern dan bersih dengan rendering teks native Windows ClearType, Zoom 75%–150%, Mode Layar Penuh (`F11`), serta dukungan System Tray.
+- ⏱️ **Auto-Blank Idle** — Kotak overlay terjemahan otomatis menghilang saat tidak ada dialog baru di layar agar gameplay tetap bersih dan imersif.
+- 🚀 **Pemeriksa Pembaruan Otomatis (*Auto-Update Checker*)** — Aplikasi secara senyap memeriksa rilis terbaru dari GitHub saat dibuka dan memunculkan banner notifikasi elegan jika ada versi baru yang dirilis oleh Danzyyy.
+
+---
+
+## 🕹️ Cara Pakai
+
+1. Jalankan **`LingoLens-Portable.exe`** (atau instal via **`Setup-LingoLens.exe`**).
+2. Buka game kamu dalam mode layar **Borderless Windowed** atau **Windowed**.
+3. Klik **`Blok Layar OCR`** (`Alt+Q`) untuk menandai kotak dialog teks game di layar.
+4. Klik **`Blok Layar Hasil`** (`Alt+A`) untuk menentukan di mana teks terjemahan ingin dimunculkan. *(Tekan `ESC` kapan saja untuk membatalkan blok layar).*
+5. Tekan **`Mulai Live`** (`Alt+E`) dan mainkan game kamu seperti biasa.
+6. Klik tombol **`Simpan`** di bar atas untuk menyimpan pengaturan posisi dan gaya untuk judul game tersebut.
+
+### ⌨️ Pintasan Keyboard (Global Hotkey)
+
+| Tombol | Fungsi |
+| :--- | :--- |
+| `Alt + E` | Mulai / Hentikan Penerjemahan Live |
+| `Alt + Q` | Blok Area OCR di layar |
+| `Alt + A` | Blok Kotak Hasil Terjemahan di layar |
+| `Alt + W` | Mode Geser / Edit Kotak langsung di atas layar |
+| `F11` | Mode Layar Penuh (Fullscreen Jendela Aplikasi) |
+| `ESC` | Batalkan pemotretan / blok area layar |
+
+---
+
+## 🛠️ Build dari Source
+
+Tidak membutuhkan Visual Studio atau .NET SDK — cukup gunakan compiler `csc.exe` bawaan Windows melalui PowerShell:
 
 ```powershell
+git clone https://github.com/danzyyy19/LingoLens.git
+cd LingoLens
 .\build.ps1
 ```
 
-Hasil build akan otomatis dibuat di folder `dist/`:
-
+Hasil biner akan otomatis dibuat di dalam folder `dist/`:
 - `dist\LingoLens-Portable.exe`
 - `dist\Setup-LingoLens.exe`
+- `dist\LingoLens.exe`
 
 ---
 
-## Lisensi
+## 📄 Lisensi
 
-Dirilis di bawah lisensi [MIT](LICENSE) — Dibuat oleh **Danzyyy**.
+Dirilis di bawah lisensi terbuka [MIT](LICENSE) — Dibuat dengan bangga oleh **Danzyyy**.
