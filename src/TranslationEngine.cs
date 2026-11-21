@@ -318,7 +318,7 @@ namespace TranslatorLive
 
                     treatAsChoice = (area.Mode == AreaTextMode.Choice) || detectedChoiceLayout;
                     cleanText = treatAsChoice
-                        ? NormalizeChoices(rawText)
+                        ? NormalizeChoices(rawText, srcLang)
                         : NormalizeText(rawText, srcLang, mergeLines);
 
                     if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
@@ -364,6 +364,15 @@ namespace TranslatorLive
 
                         if (isNewUnconfirmed)
                         {
+                            // WaitStable mode: wait one confirmation tick until text stops changing completely
+                            if (waitStable && (pendingCount == 0 || coreClean != corePend) && pendingCount < 25)
+                            {
+                                _pendingOcrByArea[area.Id] = cleanText;
+                                _pendingCountByArea[area.Id] = pendingCount + 1;
+                                _fastPollMs = 55;
+                                return;
+                            }
+
                             // First sighting of a new incomplete or short text: do a 35ms check to see if it's typing out
                             if (pendingCount == 0 && (!isTerminal || coreClean.Length < 42))
                             {
@@ -520,19 +529,19 @@ namespace TranslatorLive
                 return mBracket.Groups[2].Value.Trim();
             }
 
-            // Saria: Dialog...
+            // Saria: Dialog... (Exclude common non-speaker English prefixes like Note:, Warning:, Tip:, Objective:, Quest:, Chapter:, Location:, Hint:, Error:, Mission:, System:)
             Match mColon = Regex.Match(s, @"^([A-Z\p{Lu}][A-Za-z0-9 '\-]{1,20}):\s+(.+)$", RegexOptions.Singleline);
             if (mColon.Success && mColon.Groups[2].Value.Trim().Length > 0)
             {
                 string cand = mColon.Groups[1].Value.Trim();
-                if (!cand.Equals("http", StringComparison.OrdinalIgnoreCase) && !cand.Equals("https", StringComparison.OrdinalIgnoreCase))
+                if (!Regex.IsMatch(cand, @"^(?:http|https|note|notes|warning|caution|tip|tips|hint|hints|quest|objective|mission|chapter|act|part|stage|level|floor|room|area|location|place|time|date|day|year|status|effect|skill|item|weapon|armor|reward|bonus|tutorial|system|error|info|notice|rule|rules|goal|target|task|step|option|result|summary)$", RegexOptions.IgnoreCase))
                 {
                     speaker = cand;
                     return mColon.Groups[2].Value.Trim();
                 }
             }
 
-            // Two-line: "Saria\nYou should hurry..."
+            // Two-line: "Saria\nYou should hurry..." (Only extract if first line is not a common conversational opener/greeting)
             int nl = s.IndexOf('\n');
             if (nl > 1 && nl < 22)
             {
@@ -540,7 +549,8 @@ namespace TranslatorLive
                 string rest = s.Substring(nl + 1).Trim();
                 if (first.Length >= 2 && first.Length <= 20 && char.IsUpper(first[0]) &&
                     !first.Contains(".") && !first.Contains("!") && !first.Contains("?") && !first.Contains(",") &&
-                    first.Split(' ').Length <= 2 && rest.Length > first.Length)
+                    first.Split(' ').Length <= 2 && rest.Length > first.Length &&
+                    !Regex.IsMatch(first, @"^(?:Hello|Hi|Hey|Well|Now|So|Wait|Listen|Look|Stop|Go|Come|Run|Help|Please|Thanks|Thank\s+you|Sorry|Excuse\s+me|Yes|No|Okay|Alright|Right|Sure|Fine|Good|Great|What|Why|Where|When|Who|How|Here|There|This|That|These|Those|Watch\s+out|Hold\s+on|Hang\s+on|Be\s+careful|Come\s+on|Let's\s+go|Hurry|Hurry\s+up|By\s+the\s+way|Of\s+course|No\s+way|Not\s+yet|Once\s+upon|Long\s+ago|One\s+day|At\s+last|Finally|Suddenly|Meanwhile|However|Therefore|Besides|Anyway|Actually|Really|Seriously|Indeed|Perhaps|Maybe)$", RegexOptions.IgnoreCase))
                 {
                     speaker = first;
                     return rest;
@@ -849,13 +859,17 @@ namespace TranslatorLive
 
             // 3. Pronouns, Possessive Suffixes (-ku / -mu) & Conversational Polish (eliminating stiff "lagu saya" / "lagu aku" / "dengan aku")
             s = Regex.Replace(s, @"\b(lagu|nama|teman|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|masa\s+lalu|masa\s+depan|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)\s+(?:saya|aku)\b", "$1ku", RegexOptions.IgnoreCase);
-            s = Regex.Replace(s, @"\b(lagu|nama|teman|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)\s+Anda\b", "$1mu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(lagu|nama|teman|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)\s+(?:Anda|kamu)\b", "$1mu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmilik\s+(?:saya|aku)\b", "milikku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmilik\s+(?:Anda|kamu)\b", "milikmu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdiri\s+(?:saya|aku)\b", "diriku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdiri\s+(?:Anda|kamu)\b", "dirimu", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\bdengan\s+(?:saya|aku)\b", "denganku", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\bkepada\s+(?:saya|aku)\b|\bpada\s+(?:saya|aku)\b", "padaku", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\buntuk\s+(?:saya|aku)\b", "untukku", RegexOptions.IgnoreCase);
-            s = Regex.Replace(s, @"\bdengan\s+Anda\b", "denganmu", RegexOptions.IgnoreCase);
-            s = Regex.Replace(s, @"\bkepada\s+Anda\b|\bpada\s+Anda\b", "padamu", RegexOptions.IgnoreCase);
-            s = Regex.Replace(s, @"\buntuk\s+Anda\b", "untukmu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdengan\s+(?:Anda|kamu)\b", "denganmu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkepada\s+(?:Anda|kamu)\b|\bpada\s+(?:Anda|kamu)\b", "padamu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buntuk\s+(?:Anda|kamu)\b", "untukmu", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Dd]an\s+itu\s+berjalan\s+(?:seperti|kayak)\s+(?:ini|gini)", "Dan seperti ini");
             s = Regex.Replace(s, @"\b[Dd]an\s+begini\.\.\.", "Dan seperti ini...");
             s = Regex.Replace(s, @"\bAnda\b", "kamu");
@@ -1445,6 +1459,11 @@ namespace TranslatorLive
             if (srcLang == "en" || srcLang == "auto")
             {
                 // 4a. Contractions & Pronoun "I" misread as "11", "1'm", "l'm", "|'m", "I'rn", "l", "1", "|"
+                // Also fix curly/acute/backtick apostrophes (’, `, ´) so all contraction rules match reliably
+                s = Regex.Replace(s, @"(?<=[A-Za-z0-9\|!])[’`´](?=[A-Za-z])", "'");
+                // Fix OCR spaces around apostrophe in common contractions (e.g. "don 't" -> "don't", "I 'm" -> "I'm", "Saria 's" -> "Saria's")
+                s = Regex.Replace(s, @"\b([A-Za-z]+)\s+'\s*(s|t|m|re|ve|ll|d)\b", "$1'$2", RegexOptions.IgnoreCase);
+
                 s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'m\b", "I'm");
                 s = Regex.Replace(s, @"\b(?:1m|I'rn|Irn|11m|11'm)\b", "I'm");
                 s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'ll\b", "I'll");
@@ -1452,6 +1471,53 @@ namespace TranslatorLive
                 s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'ve\b", "I've");
                 s = Regex.Replace(s, @"\b1ve\b", "I've");
                 s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'d\b", "I'd");
+                s = Regex.Replace(s, @"\b([Yy]ou|[Ww]e|[Tt]hey)'11\b", "$1'll");
+
+                // Fix common missing-apostrophe contractions from low-contrast fonts (avoiding real words like "ill", "well", "hell", "shell", "cant", "wont" handled safely)
+                s = Regex.Replace(s, @"\bdont\b", "don't");
+                s = Regex.Replace(s, @"\bDont\b", "Don't");
+                s = Regex.Replace(s, @"\bdidnt\b", "didn't");
+                s = Regex.Replace(s, @"\bDidnt\b", "Didn't");
+                s = Regex.Replace(s, @"\bdoesnt\b", "doesn't");
+                s = Regex.Replace(s, @"\bDoesnt\b", "Doesn't");
+                s = Regex.Replace(s, @"\bisnt\b", "isn't");
+                s = Regex.Replace(s, @"\bIsnt\b", "Isn't");
+                s = Regex.Replace(s, @"\barent\b", "aren't");
+                s = Regex.Replace(s, @"\bArent\b", "Aren't");
+                s = Regex.Replace(s, @"\bwasnt\b", "wasn't");
+                s = Regex.Replace(s, @"\bWasnt\b", "Wasn't");
+                s = Regex.Replace(s, @"\bwerent\b", "weren't");
+                s = Regex.Replace(s, @"\bWerent\b", "Weren't");
+                s = Regex.Replace(s, @"\bwouldnt\b", "wouldn't");
+                s = Regex.Replace(s, @"\bWouldnt\b", "Wouldn't");
+                s = Regex.Replace(s, @"\bcouldnt\b", "couldn't");
+                s = Regex.Replace(s, @"\bCouldnt\b", "Couldn't");
+                s = Regex.Replace(s, @"\bshouldnt\b", "shouldn't");
+                s = Regex.Replace(s, @"\bShouldnt\b", "Shouldn't");
+                s = Regex.Replace(s, @"\bhavent\b", "haven't");
+                s = Regex.Replace(s, @"\bHavent\b", "Haven't");
+                s = Regex.Replace(s, @"\bhasnt\b", "hasn't");
+                s = Regex.Replace(s, @"\bHasnt\b", "Hasn't");
+                s = Regex.Replace(s, @"\bhadnt\b", "hadn't");
+                s = Regex.Replace(s, @"\bHadnt\b", "Hadn't");
+                s = Regex.Replace(s, @"\bwont\b", "won't");
+                s = Regex.Replace(s, @"\bWont\b", "Won't");
+                s = Regex.Replace(s, @"\bcant\b", "can't");
+                s = Regex.Replace(s, @"\bCant\b", "Can't");
+                s = Regex.Replace(s, @"\bIm\b", "I'm");
+                s = Regex.Replace(s, @"\bIve\b", "I've");
+                s = Regex.Replace(s, @"\byoure\b", "you're");
+                s = Regex.Replace(s, @"\bYoure\b", "You're");
+                s = Regex.Replace(s, @"\btheyre\b", "they're");
+                s = Regex.Replace(s, @"\bTheyre\b", "They're");
+                s = Regex.Replace(s, @"\bthats\b", "that's");
+                s = Regex.Replace(s, @"\bThats\b", "That's");
+                s = Regex.Replace(s, @"\bwhats\b", "what's");
+                s = Regex.Replace(s, @"\bWhats\b", "What's");
+                s = Regex.Replace(s, @"\bheres\b", "here's");
+                s = Regex.Replace(s, @"\bHeres\b", "Here's");
+                s = Regex.Replace(s, @"\btheres\b", "there's");
+                s = Regex.Replace(s, @"\bTheres\b", "There's");
 
                 // "11 <base verb>" -> "I'll <verb>"
                 s = Regex.Replace(s, @"\b11\s+(?=(?:go|do|be|take|make|see|tell|give|get|find|help|wait|show|protect|handle|leave|never|have|try|come|bring|keep|let|stop|start|need|check|ask|meet|catch|kill|destroy|save|fix|open|close|use|buy|pay|stay|return|follow)\b)", "I'll ");
@@ -1639,12 +1705,18 @@ namespace TranslatorLive
 
         public static string NormalizeChoices(string raw)
         {
+            return NormalizeChoices(raw, "auto");
+        }
+
+        public static string NormalizeChoices(string raw, string srcLang)
+        {
             if (string.IsNullOrWhiteSpace(raw)) return "";
             string[] lines = raw.Replace("\r\n", "\n").Replace("\r", "\n").Split('\n');
             List<string> cleaned = new List<string>();
             foreach (string ln in lines)
             {
-                string s = CleanGameOcrText(ln, "");
+                string s = CleanGameOcrText(ln, string.IsNullOrEmpty(srcLang) ? "auto" : srcLang);
+                s = Regex.Replace(s, @"^(?:[>▸►▶•·\-\*]|\[?\d+[\]\.\)])\s*", "");
                 s = Regex.Replace(s, @"[|_~=<>▸►▶•·]+", " ");
                 s = Regex.Replace(s, @"\s+[xX×○△□]\s*$", "");
                 s = Regex.Replace(s, @"\s+", " ").Trim();

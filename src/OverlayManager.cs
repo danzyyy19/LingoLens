@@ -781,6 +781,7 @@ namespace TranslatorLive
                     rp.EditMode = EditMode;
                     rp.Bounds = box;
                     rp.TextContent = a.LastText ?? "";
+                    rp.SpeakerName = a.LastSpeaker ?? "";
                     if (EditMode || (a.Enabled && !(_cfg.HideEmpty && string.IsNullOrEmpty(rp.TextContent)))) { rp.Show(); rp.Render(_cfg); }
                     _resultPanes.Add(rp);
                 }

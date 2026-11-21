@@ -228,14 +228,24 @@ namespace TranslatorLive
                             return 1;
                         }
 
-                        // Test Choice Mode (line-by-line separate translation!)
-                        string choicesRaw = "> I'm not sure.\n  I do! x";
-                        string choicesNorm = TranslationEngine.NormalizeChoices(choicesRaw);
+                        // Test Choice Mode (line-by-line separate translation + universal OCR digit/apostrophe repair inside choices!)
+                        string choicesRaw = "> 1'm not sure.\n  l dont know! x";
+                        string choicesNorm = TranslationEngine.NormalizeChoices(choicesRaw, "en");
                         string choicesTr = eng.TranslateChoicesLineByLine(choicesNorm, "en", "id", "google", "", true, out prov, out terr);
                         LogTest("[TRANS-CHOICES]\n" + choicesTr);
-                        if (string.IsNullOrEmpty(choicesTr) || !choicesTr.Contains("\n"))
+                        if (string.IsNullOrEmpty(choicesTr) || !choicesTr.Contains("\n") || !choicesNorm.Contains("I'm") || !choicesNorm.Contains("I don't"))
                         {
-                            LogTest("[FAIL] Choice line-by-line separation failed.");
+                            LogTest("[FAIL] Choice line-by-line separation or OCR repair failed: " + choicesNorm);
+                            return 1;
+                        }
+
+                        // Test Speaker Extraction False-Positive Guard ("Look\nThere is a chest!" or "Warning: Low HP" must NOT extract "Look"/"Warning" as speaker)
+                        string falseSpk1, falseSpk2;
+                        string body1 = TranslationEngine.ExtractSpeakerTag("Look\nThere is a treasure chest ahead!", out falseSpk1);
+                        string body2 = TranslationEngine.ExtractSpeakerTag("Warning: Entering dangerous area.", out falseSpk2);
+                        if (!string.IsNullOrEmpty(falseSpk1) || !string.IsNullOrEmpty(falseSpk2))
+                        {
+                            LogTest("[FAIL] Speaker false positive guard failed: '" + falseSpk1 + "', '" + falseSpk2 + "'");
                             return 1;
                         }
                     }

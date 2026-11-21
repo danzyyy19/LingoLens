@@ -387,23 +387,31 @@ namespace TranslatorLive
             // Bug fix: discard late async result if user already paused/stopped Live!
             if (!_engine.IsRunning) return;
 
-            lock (_cfg.Sync)
-            {
-                Area a = _cfg.FindArea(e.AreaId);
-                if (a != null)
-                {
-                    a.LastSource = e.SourceText;
-                    a.LastText = e.TranslatedText;
-                    a.LastSpeaker = e.SpeakerName ?? "";
-                }
-            }
-
             if (e.ClearedByIdle)
             {
+                lock (_cfg.Sync)
+                {
+                    Area a = _cfg.FindArea(e.AreaId);
+                    if (a != null)
+                    {
+                        a.LastText = "";
+                        a.LastSpeaker = "";
+                    }
+                }
                 _liveStatus = "Idle · overlay disembunyikan";
             }
             else
             {
+                lock (_cfg.Sync)
+                {
+                    Area a = _cfg.FindArea(e.AreaId);
+                    if (a != null)
+                    {
+                        a.LastSource = e.SourceText;
+                        a.LastText = e.TranslatedText;
+                        a.LastSpeaker = e.SpeakerName ?? "";
+                    }
+                }
                 if (!string.IsNullOrEmpty(e.SourceText)) _liveSource = e.SourceText;
                 if (!string.IsNullOrEmpty(e.TranslatedText))
                     _liveResult = string.IsNullOrEmpty(e.SpeakerName) ? e.TranslatedText : ("[" + e.SpeakerName + "] " + e.TranslatedText);
