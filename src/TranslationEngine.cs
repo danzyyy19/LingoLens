@@ -1220,12 +1220,12 @@ namespace TranslatorLive
                         int tophat = val - lmin;
 
                         byte ink = 0;
-                        int minVal = hasDarkBox ? 95 : 115;
-                        int minTopHat = hasDarkBox ? 28 : 34;
+                        int minVal = hasDarkBox ? 80 : 95;
+                        int minTopHat = hasDarkBox ? 20 : 24;
                         if (val > minVal && tophat > minTopHat)
                         {
-                            int boosted = (tophat - minTopHat) * 3;
-                            if (val > 180 && tophat > 55) boosted = Math.Max(boosted, val);
+                            int boosted = (tophat - minTopHat) * 4;
+                            if (val > 170 && tophat > 42) boosted = Math.Max(boosted, val);
                             ink = (byte)Math.Min(255, Math.Max(0, boosted));
                         }
 
@@ -1273,7 +1273,22 @@ namespace TranslatorLive
                 int validWords = 0;
                 foreach (string w in words)
                 {
-                    string cleanW = Regex.Replace(w, @"[^A-Za-z]", "");
+                    string trimmedW = w.Trim('.', ',', '!', '?', ';', ':', '"', '\'', '“', '”', '’', '(', ')', '[', ']');
+                    if (trimmedW.Length == 0) continue;
+
+                    // Penalize suspicious digit hallucinations (e.g. "11" for "I'm", "1001"/"100k" for "look", "t0" for "to")
+                    if (Regex.IsMatch(trimmedW, @"^(?:11|1001|100k|l00k|1ook|0|1)$", RegexOptions.IgnoreCase))
+                    {
+                        score -= 18;
+                        continue;
+                    }
+                    if (Regex.IsMatch(trimmedW, @"[0-9]") && Regex.IsMatch(trimmedW, @"[A-Za-z]") &&
+                        !Regex.IsMatch(trimmedW, @"^(?:\d+(?:st|nd|rd|th|s|g|k|m|p|x|d|hp|mp|xp|lv)|lv\d+)$", RegexOptions.IgnoreCase))
+                    {
+                        score -= 18;
+                    }
+
+                    string cleanW = Regex.Replace(trimmedW, @"[^A-Za-z]", "");
                     if (cleanW.Length == 0) continue;
                     if (cleanW.Length == 1 && cleanW != "I" && cleanW != "a" && cleanW != "A")
                         score -= 12;
@@ -1322,7 +1337,7 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\b(tal|wal|fol)<(?!\w)", "$1k", RegexOptions.IgnoreCase); // tal< -> talk, wal< -> walk
             s = Regex.Replace(s, @"l<", "k");                             // mal<e -> make, lil<e -> like
             s = Regex.Replace(s, @"(?<=[A-Za-z])<(?=[A-Za-z])", "k");      // < between letters -> k
-            s = Regex.Replace(s, @"(?<=[\s\(\[\{]|^)[<>\*~^|_#]+", "");    // leading noise symbols
+            s = Regex.Replace(s, @"(?<=[\s\(\[\{]|^)[<>\*~^_#]+", "");     // leading noise symbols (keep | for I-restoration first)
             s = Regex.Replace(s, @"[<>\*~^|_#]+(?=[\s\)\.\,\!\?\]\}]|$)", ""); // trailing noise symbols
             s = Regex.Replace(s, @"[&*]+([A-Za-z\u00C0-\u024F])", "$1");   // &word -> word
             s = Regex.Replace(s, @"([A-Za-z\u00C0-\u024F])[&*]+", "$1");   // word* -> word
@@ -1334,7 +1349,62 @@ namespace TranslatorLive
             // 3. Glued lowercase-to-uppercase words (e.g. DearNavi -> Dear Navi)
             s = Regex.Replace(s, @"(?<=[a-z])(?=[A-Z][a-z])", " ");
 
-            // 4. Retro / Game Font Dialogue & Entity Typo Corrections
+            // 4. Universal English / Latin Digit-to-Letter & Ligature OCR Restoration (Applies to ALL games)
+            if (srcLang == "en" || srcLang == "auto")
+            {
+                // 4a. Contractions & Pronoun "I" misread as "11", "1'm", "l'm", "|'m", "I'rn", "l", "1", "|"
+                s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'m\b", "I'm");
+                s = Regex.Replace(s, @"\b(?:1m|I'rn|Irn|11m|11'm)\b", "I'm");
+                s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'ll\b", "I'll");
+                s = Regex.Replace(s, @"\b(?:1ll|11ll|I1l|Il1)\b", "I'll");
+                s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'ve\b", "I've");
+                s = Regex.Replace(s, @"\b1ve\b", "I've");
+                s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|!1l])'d\b", "I'd");
+
+                // "11 <base verb>" -> "I'll <verb>"
+                s = Regex.Replace(s, @"\b11\s+(?=(?:go|do|be|take|make|see|tell|give|get|find|help|wait|show|protect|handle|leave|never|have|try|come|bring|keep|let|stop|start|need|check|ask|meet|catch|kill|destroy|save|fix|open|close|use|buy|pay|stay|return|follow)\b)", "I'll ");
+
+                // "11 <non-unit word>" at start of sentence/clause or after conjunction -> "I'm "
+                s = Regex.Replace(s, @"(?:(?<=^|[\.\!\?\,\;\:""'“”\(]\s*)|(?<=\b(?:and|but|so|because|since|that|if|when|while|though|although)\s+))11\s+(?!(?:years|days|hours|minutes|seconds|months|weeks|times|people|men|women|children|items|coins|gold|bucks|dollars|yen|gil|rupees|souls|points|percent|o'clock|am|pm|levels|floors|steps|miles|meters|feet|inches|pounds|kg|cm|mm|of\b)\b)(?=[A-Za-z])", "I'm ");
+
+                // "11 <present participle / state adjective>" anywhere -> "I'm "
+                s = Regex.Replace(s, @"\b11\s+(?=(?:[a-z]+ing|sorry|sure|ready|glad|afraid|happy|tired|exhausted|fine|okay|alright|here|back|not|just|still|only|already|so|too|very|quite|really|about|on|in|at|from|with|a|an|the|your|her|his|my|our|their|done|finished|dead|alive|hurt|stuck|lost|late|certain|positive|worried|scared|proud|honored|grateful|thankful)\b)", "I'm ");
+
+                // Standalone l / 1 / | before common verbs -> "I "
+                s = Regex.Replace(s, @"(?:(?<=^|[\s\(\[""'“”])[\|1l])\s+(?=(?:am|was|were|have|had|will|would|can|could|should|shall|must|may|might|need|want|think|thought|know|knew|see|saw|feel|felt|hope|wish|guess|suppose|believe|understand|remember|forgot|mean|meant|said|told|asked|heard|found|got|took|made|came|went|left|gave|tried|used|loved|hated|feared|doubted|wonder|bet|swear|promise|refuse|agree|disagree|don't|didn't|won't|can't|couldn't|shouldn't|wouldn't|haven't|hadn't|wasn't|cannot)\b)", "I ");
+
+                // 4b. "1001" / "100k" / "l00k" / "1ook" -> "Look" (at sentence start) or "look"
+                s = Regex.Replace(s, @"(?<=^|[\.\!\?""'“”]\s*)(?:1001|100k|l00k|L00k|L001|100K)(s|ed|ing)?\b(?!(?:\s+(?:nights|arabian|dalmatians|years|coins|points|gold|rupees|gil|exp|hp|mp))\b)", "Look$1");
+                s = Regex.Replace(s, @"(?<!\b(?:year|room|page|level|lvl|id|code|error|port)\s+)\b(?:1001|100k|l00k|1ook|l001|10ok|lo0k)(s|ed|ing)?\b(?!(?:\s+(?:nights|arabian|dalmatians|years|coins|points|gold|rupees|gil|exp|hp|mp))\b)", "look$1");
+                s = Regex.Replace(s, @"\b(?:L00k|L001|100K)(s|ed|ing)?\b", "Look$1");
+
+                // 4c. "10-" words -> "lo-" (10st -> lost, 10ng -> long, 10ve -> love, 10rd -> lord, 10ck -> lock, 10w -> low, 10ud -> loud, 100se -> loose)
+                s = Regex.Replace(s, @"\b10(st|ng|ve[dsr]?|rd[s]?|ck(?:s|ed|ing)?|w(?:er|est|ly)?|ud(?:er|est|ly)?|0se|cal|nely|cat(?:e|ed|ing|ion))\b", "lo$1");
+
+                // 4d. Leading '1' before letters -> 'I' or 'l' (excluding 1st)
+                s = Regex.Replace(s, @"\b1(t's|t|n|s|f|nto|nside|ndeed|nstead|mpossible|mportant|mmortal|sland|tem|dea|diot|gnore|llusion|magine|nform|nvite|nclude|ncrease|nsist)\b", "I$1");
+                s = Regex.Replace(s, @"\b1(?!st\b)([a-z]{2,})\b", "l$1");
+
+                // 4e. Internal/trailing '1' adjacent to letters -> 'l' (wi11 -> will, te11 -> tell, care1ess1y -> carelessly)
+                s = Regex.Replace(s, @"(?<=[a-zA-Z])1+", delegate(Match m) { return new string('l', m.Length); });
+
+                // 4f. Digit '0' adjacent to letters -> 'o' / 'O' (t0 -> to, g0 -> go, y0u -> you, w0rld -> world, 0ne -> one)
+                s = Regex.Replace(s, @"\b0([a-z]+)\b", "o$1");
+                s = Regex.Replace(s, @"\b0([A-Z][a-z]+)\b", "O$1");
+                s = Regex.Replace(s, @"(?<=[a-zA-Z])0+", delegate(Match m) { return new string('o', m.Length); });
+
+                // 4g. Common Font Ligatures: vv -> w, rn -> m
+                s = Regex.Replace(s, @"\bvv([a-zA-Z]+)\b", "w$1");
+                s = Regex.Replace(s, @"\bVV([a-zA-Z]+)\b", "W$1");
+                s = Regex.Replace(s, @"\brn(ust|ake|ade|any|ore|ost|uch|y|e|ean|eant|ight|ind|agic|onster|aster|other|ove|oment|ountain|ission|ay|an|en)\b", "m$1");
+                s = Regex.Replace(s, @"\b(ti|so|co|ho|na|ga|sa|fla|fra|sha|bla)rne(s|d|one|thing|where|how|times)?\b", "$1me$2");
+                s = Regex.Replace(s, @"\bfrorn\b", "from");
+                s = Regex.Replace(s, @"\btherne\b", "theme");
+                s = Regex.Replace(s, @"\benern(y|ies)\b", "enem$1");
+                s = Regex.Replace(s, @"\b(?:rernember|remernber)\b", "remember");
+            }
+
+            // 5. Classic Retro / Adventure Font Typo Corrections
             s = Regex.Replace(s, @"\bLinl[ec]\b|\bLineha\b", "Link");
             s = Regex.Replace(s, @"\bfrule\s+Castle\b", "Hyrule Castle");
             s = Regex.Replace(s, @"\bfrule\b", "Hyrule");
@@ -1346,9 +1416,9 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\berad\b(?=\s+of)", "end");
             s = Regex.Replace(s, @"\bT0\*\b|\bT0\b", "To");
             s = Regex.Replace(s, @"\bIbhppe\s+o\b|\bIbhppe\b", "beyond help");
-            s = Regex.Replace(s, @"\binteétioh\b", "intention");
+            s = Regex.Replace(s, @"\binteétioh\b|\binteetioh\b", "intention");
 
-            // 5. Filter garbage tokens in English / Latin (e.g. 9äUxyfios)
+            // 6. Filter genuine non-ASCII / mixed-case 3D texture garbage tokens (e.g. 9äUxyfios) without deleting valid words or numbers
             if (srcLang == "en" || srcLang == "auto")
             {
                 string[] tokens = s.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
@@ -1358,8 +1428,9 @@ namespace TranslatorLive
                     string t = tok.Trim();
                     if (t.Length == 0) continue;
 
-                    // Noise token: starts with digit followed by letters with diacritics
-                    if (Regex.IsMatch(t, @"^\d+[a-zA-Z\u00C0-\u024F]{2,}"))
+                    // Only drop token if it starts with a digit AND has non-ASCII diacritics or random mid-word uppercase (like 9äUxyfios)
+                    if (Regex.IsMatch(t, @"^\d+[a-zA-Z\u00C0-\u024F]*[\u00C0-\u024F][a-zA-Z\u00C0-\u024F]*$") ||
+                        Regex.IsMatch(t, @"^\d+[a-z]+[A-Z][a-zA-Z0-9]{2,}$"))
                         continue;
 
                     // Isolated noise punctuation
@@ -1370,7 +1441,7 @@ namespace TranslatorLive
                 }
                 s = string.Join(" ", cleanTokens.ToArray());
 
-                // 6. Universal Diacritic Normalization for English/Latin text
+                // 7. Universal Diacritic Normalization for English/Latin text
                 s = RemoveDiacritics(s);
                 // Strip single stray consonants at sentence boundaries (e.g. "protect t.")
                 s = Regex.Replace(s, @"\b([a-zA-Z]{3,})\s+[b-df-hj-np-tv-zB-DF-HJ-NP-TV-Z](?=[\.\,\!\?]|\s*$)", "$1");

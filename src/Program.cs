@@ -151,13 +151,24 @@ namespace TranslatorLive
                             }
                         }
 
-                        // Test Game OCR Cleaning & Typo Restoration
+                        // Test Game OCR Cleaning & Universal Digit-to-Letter / Ligature Restoration across ALL games
                         string dirtySample = "The man I spoke of<, dreams each night, Linle... my 9äUxyfios exhausted... mal<e your way to frule Castle.";
                         string cleanedSample = TranslationEngine.CleanGameOcrText(dirtySample, "en");
                         LogTest("[CLEAN-GAME-OCR] " + cleanedSample);
                         if (!cleanedSample.Contains("Link") || !cleanedSample.Contains("Hyrule Castle") || !cleanedSample.Contains("make") || cleanedSample.Contains("9äUxyfios"))
                         {
                             LogTest("[FAIL] CleanGameOcrText failed: " + cleanedSample);
+                            return 1;
+                        }
+
+                        string univDirty = "11 going to 1001 at that! 1'm sorry, l don't know vvhat y0u rnean. He wi11 te11 y0u in 1st place for 11 years.";
+                        string univClean = TranslationEngine.CleanGameOcrText(univDirty, "en");
+                        LogTest("[UNIVERSAL-OCR-REPAIR] " + univClean);
+                        if (!univClean.Contains("I'm going to look at that!") ||
+                            !univClean.Contains("I'm sorry, I don't know what you mean.") ||
+                            !univClean.Contains("He will tell you in 1st place for 11 years."))
+                        {
+                            LogTest("[FAIL] Universal OCR repair failed: " + univClean);
                             return 1;
                         }
 
