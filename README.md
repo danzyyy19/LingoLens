@@ -1,21 +1,5 @@
 <div align="center">
 
-<img src="assets/icon_preview.png" alt="LingoLens Logo" width="110" />
-
-# LingoLens
-
-**Real-time screen & game OCR overlay translator for Windows.**  
-Dibuat murni dengan C# (.NET Framework + WinRT OCR) tanpa Python atau dependensi berat.
-
-[![Release](https://img.shields.io/github/v/release/danzyyy19/LingoLens?style=flat-square&color=d97757)](https://github.com/danzyyy19/LingoLens/releases/latest)
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-blue?style=flat-square)](https://github.com/danzyyy19/LingoLens/releases/latest)
-[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![Author](https://img.shields.io/badge/by-Danzyyy-orange?style=flat-square)](https://github.com/danzyyy19)
-
-[Download](https://github.com/danzyyy19/LingoLens/releases/latest) · [Fitur Utama](#-fitur-utama) · [Cara Pakai](#-cara-pakai) · [Build dari Source](#-build-dari-source)
-
-</div>
-
 ---
 
 ## Tentang LingoLens
@@ -30,10 +14,10 @@ Dibuat murni dengan C# (.NET Framework + WinRT OCR) tanpa Python atau dependensi
 
 Unduh versi siap pakai melalui halaman [**GitHub Releases**](https://github.com/danzyyy19/LingoLens/releases/latest):
 
-| Versi | File | Keterangan |
-| :--- | :--- | :--- |
-| **Portable** | `LingoLens-Portable.exe` | Langsung jalankan tanpa install; konfigurasi & profil game tersimpan portabel. |
-| **Installer** | `Setup-LingoLens.exe` | Pasang ke Windows dengan shortcut Start Menu, Desktop, dan Uninstaller. |
+| Versi               | File                       | Keterangan                                                                     |
+| :------------------ | :------------------------- | :----------------------------------------------------------------------------- |
+| **Portable**  | `LingoLens-Portable.exe` | Langsung jalankan tanpa install; konfigurasi & profil game tersimpan portabel. |
+| **Installer** | `Setup-LingoLens.exe`    | Pasang ke Windows dengan shortcut Start Menu, Desktop, dan Uninstaller.        |
 
 ---
 
@@ -60,6 +44,7 @@ Unduh versi siap pakai melalui halaman [**GitHub Releases**](https://github.com/
 5. Gunakan tombol **`Simpan`** di bar atas untuk menyimpan template profil berdasarkan judul game.
 
 ### Pintasan Keyboard (Global Hotkey)
+
 - `Alt + E` — Mulai / Hentikan Live Translation
 - `Alt + Q` — Blok Area OCR di layar
 - `Alt + A` — Blok Kotak Hasil di layar
@@ -73,10 +58,11 @@ Unduh versi siap pakai melalui halaman [**GitHub Releases**](https://github.com/
 Tidak perlu Visual Studio atau .NET SDK — cukup gunakan compiler `csc.exe` bawaan Windows via PowerShell:
 
 ```powershell
-
+.\build.ps1
 ```
 
 Hasil build akan otomatis dibuat di folder `dist/`:
+
 - `dist\LingoLens-Portable.exe`
 - `dist\Setup-LingoLens.exe`
 

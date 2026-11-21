@@ -2,8 +2,19 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
+
+[assembly: AssemblyTitle("LingoLens")]
+[assembly: AssemblyDescription("Penerjemah Layar Game Real-Time untuk Windows")]
+[assembly: AssemblyCompany("Danzyyy")]
+[assembly: AssemblyProduct("LingoLens")]
+[assembly: AssemblyCopyright("Copyright © 2026 Danzyyy")]
+[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyInformationalVersion("0.2 Beta")]
 
 namespace TranslatorLive
 {
@@ -35,12 +46,32 @@ namespace TranslatorLive
             return 0;
         }
 
+        private static void LogTest(string msg)
+        {
+            try { Console.WriteLine(msg); } catch { }
+            try { File.AppendAllText("selftest.log", msg + Environment.NewLine, Encoding.UTF8); } catch { }
+        }
+
         private static int RunSelfTest()
         {
             AttachConsole(-1);
             try
             {
-                Console.WriteLine("=== LingoLens C# Claude UI + Engine Self-Test ===");
+                var stdOutStream = Console.OpenStandardOutput();
+                if (stdOutStream != null)
+                {
+                    var writer = new StreamWriter(stdOutStream, Encoding.UTF8) { AutoFlush = true };
+                    Console.SetOut(writer);
+                    Console.SetError(writer);
+                }
+            }
+            catch { }
+
+            try { File.WriteAllText("selftest.log", ""); } catch { }
+
+            try
+            {
+                LogTest("=== LingoLens C# Claude UI + Engine Self-Test ===");
 
                 AppConfig cfg = new AppConfig();
                 using (TranslationEngine eng = new TranslationEngine(cfg))
@@ -60,44 +91,75 @@ namespace TranslatorLive
                         string err;
                         string ocr = eng.RecognizeBitmap(bmp, "en", out usedOnline, out err);
                         string norm = TranslationEngine.NormalizeText(ocr, "en", true);
-                        Console.WriteLine("[OCR] '" + norm + "'");
+                        LogTest("[OCR] '" + norm + "'");
                         if (string.IsNullOrEmpty(norm) || !norm.ToLowerInvariant().Contains("gate"))
                         {
-                            Console.WriteLine("[FAIL] WinRT OCR failed.");
+                            LogTest("[FAIL] WinRT OCR failed.");
                             return 1;
                         }
 
                         string prov, terr;
                         string tr = eng.TranslateText(norm, "en", "id", "google", "", true, out prov, out terr);
-                        Console.WriteLine("[TRANS-DIALOG] '" + tr + "' (" + prov + ")");
+                        LogTest("[TRANS-DIALOG] '" + tr + "' (" + prov + ")");
                         if (string.IsNullOrEmpty(tr))
                         {
-                            Console.WriteLine("[FAIL] Dialog translation failed.");
+                            LogTest("[FAIL] Dialog translation failed.");
                             return 1;
                         }
 
                         // Test Natural Idiom / Polite Everyday Tone + Speaker Tag + Glossary
                         string speakerTest;
                         string bodyOnly = TranslationEngine.ExtractSpeakerTag("Saria: You should hurry. Catch me up later!", out speakerTest);
-                        Console.WriteLine("[SPEAKER] '" + speakerTest + "' -> '" + bodyOnly + "'");
+                        LogTest("[SPEAKER] '" + speakerTest + "' -> '" + bodyOnly + "'");
                         if (speakerTest != "Saria" || !bodyOnly.Contains("hurry"))
                         {
-                            Console.WriteLine("[FAIL] Speaker tag extraction failed.");
+                            LogTest("[FAIL] Speaker tag extraction failed.");
                             return 1;
                         }
                         string idiomTr = eng.TranslateText(bodyOnly, "en", "id", "google", "", true, out prov, out terr, "Hyrule;Saria;Triforce");
-                        Console.WriteLine("[TRANS-IDIOM] '" + idiomTr + "' (" + prov + ")");
-                        if (string.IsNullOrEmpty(idiomTr) || idiomTr.ToLowerInvariant().Contains("tangkap aku") || idiomTr.ToLowerInvariant().Contains("anda"))
+                        LogTest("[TRANS-IDIOM] '" + idiomTr + "' (" + prov + ")");
+                        if (string.IsNullOrEmpty(idiomTr) || idiomTr.ToLowerInvariant().Contains("tangkap") || idiomTr.ToLowerInvariant().Contains("anda"))
                         {
-                            Console.WriteLine("[FAIL] Idiom / polite everyday naturalization failed.");
+                            LogTest("[FAIL] Idiom / polite everyday naturalization failed.");
+                            return 1;
+                        }
+
+                        // Direct verification of Indonesian everyday naturalization rules
+                        string testStiff1 = TranslationEngine.NaturalizeIndonesian("Tangkap saya nanti. Saya punya ini.", "id", true);
+                        string testStiff2 = TranslationEngine.NaturalizeIndonesian("Apakah Anda tidak bisa melakukannya? Jangan khawatir, tentu saja!", "id", true);
+                        string testStiff3 = TranslationEngine.NaturalizeIndonesian("Dia sedang tidur karena sangat lelah.", "id", true);
+                        string testZelda = TranslationEngine.NaturalizeIndonesian("Temui Pohon Deku yang baik dan bawa Pedang guru.", "id", true);
+                        LogTest("[NATURAL-1] " + testStiff1);
+                        LogTest("[NATURAL-2] " + testStiff2);
+                        LogTest("[NATURAL-3] " + testStiff3);
+                        LogTest("[NATURAL-ZELDA] " + testZelda);
+
+                        if (testStiff1.ToLowerInvariant().Contains("tangkap") || testStiff1.ToLowerInvariant().Contains("saya punya"))
+                        {
+                            LogTest("[FAIL] testStiff1 failed: " + testStiff1);
+                            return 1;
+                        }
+                        if (testStiff2.ToLowerInvariant().Contains("anda") || testStiff2.ToLowerInvariant().Contains("tidak bisa") || testStiff2.ToLowerInvariant().Contains("saja"))
+                        {
+                            LogTest("[FAIL] testStiff2 failed: " + testStiff2);
+                            return 1;
+                        }
+                        if (!testStiff3.Contains("lagi tidur") || !testStiff3.Contains("lelah banget"))
+                        {
+                            LogTest("[FAIL] testStiff3 failed: " + testStiff3);
+                            return 1;
+                        }
+                        if (testZelda.Contains("Pohon Deku yang baik") || testZelda.Contains("Pedang guru"))
+                        {
+                            LogTest("[FAIL] testZelda failed: " + testZelda);
                             return 1;
                         }
 
                         string glossTr = eng.TranslateText("Protect the Triforce in Hyrule!", "en", "id", "google", "", true, out prov, out terr, "Hyrule;Triforce");
-                        Console.WriteLine("[GLOSSARY] '" + glossTr + "'");
+                        LogTest("[GLOSSARY] '" + glossTr + "'");
                         if (!glossTr.Contains("Triforce") || !glossTr.Contains("Hyrule"))
                         {
-                            Console.WriteLine("[FAIL] Glossary term protection failed.");
+                            LogTest("[FAIL] Glossary term protection failed.");
                             return 1;
                         }
 
@@ -105,10 +167,10 @@ namespace TranslatorLive
                         string choicesRaw = "> I'm not sure.\n  I do! x";
                         string choicesNorm = TranslationEngine.NormalizeChoices(choicesRaw);
                         string choicesTr = eng.TranslateChoicesLineByLine(choicesNorm, "en", "id", "google", "", true, out prov, out terr);
-                        Console.WriteLine("[TRANS-CHOICES]\n" + choicesTr);
+                        LogTest("[TRANS-CHOICES]\n" + choicesTr);
                         if (string.IsNullOrEmpty(choicesTr) || !choicesTr.Contains("\n"))
                         {
-                            Console.WriteLine("[FAIL] Choice line-by-line separation failed.");
+                            LogTest("[FAIL] Choice line-by-line separation failed.");
                             return 1;
                         }
                     }
@@ -123,7 +185,7 @@ namespace TranslatorLive
                 profCfg.Areas[1].Style.FontSize = 12;
                 if (profCfg.Areas[1].EffectiveStyle(profCfg).FontSize != 12)
                 {
-                    Console.WriteLine("[FAIL] Per-area EffectiveStyle failed.");
+                    LogTest("[FAIL] Per-area EffectiveStyle failed.");
                     return 1;
                 }
                 string tmpIni = Path.Combine(Path.GetTempPath(), "tl_selftest_profile.ini");
@@ -132,44 +194,69 @@ namespace TranslatorLive
                 try { File.Delete(tmpIni); } catch { }
                 if (loadedProf == null || loadedProf.Areas.Count < 2 || !loadedProf.Areas[1].Style.UseCustom || loadedProf.Areas[1].Style.FontSize != 12)
                 {
-                    Console.WriteLine("[FAIL] GameProfile INI save/load roundtrip failed.");
+                    LogTest("[FAIL] GameProfile INI save/load roundtrip failed.");
                     return 1;
                 }
-                Console.WriteLine("[PROFILE-OK] GameProfile & Per-Area Style roundtrip passed.");
+                LogTest("[PROFILE-OK] GameProfile & Per-Area Style roundtrip passed.");
 
                 string outDir = Path.GetDirectoryName(Application.ExecutablePath);
+                string brainDir = @"C:\Users\danic\.gemini\antigravity\brain\a4be1715-04e8-4b64-be13-1a44e8d8f78d";
                 using (MainWindow w = new MainWindow(new AppConfig()))
                 {
                     w.Size = new Size(1080, 730);
                     w.Show();
 
+                    // Dark Mode Live Tab
                     w.SetPreviewState(0, true); w.Refresh();
-                    SaveShot(w, Path.Combine(outDir, "claude_dark_live.png"));
+                    SaveShot(w, Path.Combine(outDir, "minimalist_dark_live.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_dark_live.png"));
 
+                    // Light Mode Live Tab
+                    w.SetPreviewState(0, false); w.Refresh();
+                    SaveShot(w, Path.Combine(outDir, "minimalist_light_live.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_light_live.png"));
+
+                    // Dark Mode Appearance Tab
+                    w.SetPreviewState(1, true); w.Refresh();
+                    SaveShot(w, Path.Combine(outDir, "minimalist_dark_style.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_dark_style.png"));
+
+                    // Light Mode Appearance Tab
                     w.SetPreviewState(1, false); w.Refresh();
-                    SaveShot(w, Path.Combine(outDir, "claude_light_style.png"));
+                    SaveShot(w, Path.Combine(outDir, "minimalist_light_style.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_light_style.png"));
 
-                    w.SetPreviewState(3, true); w.Refresh();
-                    SaveShot(w, Path.Combine(outDir, "claude_dark_changelog.png"));
+                    // Dark Mode System Tab
+                    w.SetPreviewState(2, true); w.Refresh();
+                    SaveShot(w, Path.Combine(outDir, "minimalist_dark_system.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_dark_system.png"));
+
+                    // Light Mode System Tab
+                    w.SetPreviewState(2, false); w.Refresh();
+                    SaveShot(w, Path.Combine(outDir, "minimalist_light_system.png"));
+                    if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_light_system.png"));
 
                     w.Close();
                 }
 
-                Console.WriteLine("[PASS] All Claude UI, Zoom, Fullscreen, WinRT OCR & Translation Tests Passed!");
+                LogTest("[PASS] All Minimalist UI, Dark & Light Mode, WinRT OCR & Translation Tests Passed!");
                 return 0;
             }
             catch (Exception ex)
             {
-                Console.WriteLine("[EXCEPTION] " + ex.ToString());
+                LogTest("[EXCEPTION] " + ex.ToString());
                 return 1;
             }
         }
 
-        private static void SaveShot(Form f, string path)
+        private static void SaveShot(MainWindow f, string path)
         {
-            using (Bitmap b = new Bitmap(f.ClientSize.Width, f.ClientSize.Height))
+            using (Bitmap b = new Bitmap(f.ClientSize.Width, f.ClientSize.Height, PixelFormat.Format24bppRgb))
             {
-                f.DrawToBitmap(b, new Rectangle(0, 0, b.Width, b.Height));
+                using (Graphics g = Graphics.FromImage(b))
+                {
+                    f.RenderWindow(g);
+                }
                 b.Save(path, ImageFormat.Png);
             }
         }

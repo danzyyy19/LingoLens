@@ -281,8 +281,8 @@ namespace TranslatorLive
                     g.Clear(Color.Transparent);
 
                     RectangleF rc = new RectangleF(1f, 1f, Width - 2f, Height - 2f);
-                    Theme.FillRR(g, rc, 24f, Color.FromArgb(245, 28, 27, 25));
-                    Theme.DrawRR(g, rc, 24f, Color.FromArgb(160, 217, 119, 87), 1.4f);
+                    Theme.FillRR(g, rc, 24f, Color.FromArgb(245, 24, 24, 27));
+                    Theme.DrawRR(g, rc, 24f, Color.FromArgb(160, 63, 63, 70), 1.4f);
 
                     using (Font f = Theme.UiFont(12.5f, true))
                     using (Font fs = Theme.UiFont(11.5f, false))
@@ -292,7 +292,7 @@ namespace TranslatorLive
                     using (SolidBrush sBr = new SolidBrush(Color.FromArgb(255, 235, 232, 226)))
                     {
                         using (SolidBrush bBlue = new SolidBrush(Color.FromArgb(255, 86, 152, 255)))
-                        using (SolidBrush bCoral = new SolidBrush(Color.FromArgb(255, 217, 119, 87)))
+                        using (SolidBrush bCoral = new SolidBrush(Color.FromArgb(255, 16, 185, 129)))
                         {
                             g.FillEllipse(bBlue, 18f, 19f, 10f, 10f);
                             g.FillEllipse(bCoral, 108f, 19f, 10f, 10f);
@@ -306,7 +306,7 @@ namespace TranslatorLive
                         g.DrawString("+ Area Baru", f, wBr, _btnAdd, sfC);
 
                         _btnDone = new RectangleF(Width - 136f, 8f, 126f, 32f);
-                        Theme.FillRR(g, _btnDone, 16f, _hover == "done" ? Color.FromArgb(255, 199, 101, 70) : Color.FromArgb(255, 217, 119, 87));
+                        Theme.FillRR(g, _btnDone, 16f, _hover == "done" ? Color.FromArgb(255, 5, 150, 105) : Color.FromArgb(255, 16, 185, 129));
                         g.DrawString("Selesai (ESC)", f, wBr, _btnDone, sfC);
                     }
                 }
@@ -455,14 +455,14 @@ namespace TranslatorLive
                         }
                         else if (EditMode)
                         {
-                            Theme.FillRR(g, rc, rad, Color.FromArgb(48, 217, 119, 87));
+                            Theme.FillRR(g, rc, rad, Color.FromArgb(48, 16, 185, 129));
                         }
 
                         if (EditMode)
                         {
-                            Theme.DrawRR(g, rc, rad, Color.FromArgb(245, 217, 119, 87), 2f);
+                            Theme.DrawRR(g, rc, rad, Color.FromArgb(245, 16, 185, 129), 2f);
                             RectangleF tag = new RectangleF(8f, 8f, Math.Min(Width - 16f, 220f), 24f);
-                            Theme.FillRR(g, tag, 6f, Color.FromArgb(238, 201, 100, 66));
+                            Theme.FillRR(g, tag, 6f, Color.FromArgb(238, 16, 185, 129));
                             using (Font ft = Theme.UiFont(11.5f, true))
                             using (StringFormat sfL = new StringFormat { Alignment = StringAlignment.Near, LineAlignment = StringAlignment.Center })
                             using (SolidBrush wBr = new SolidBrush(Color.White))
@@ -471,7 +471,7 @@ namespace TranslatorLive
                                 g.DrawString(lbl + "  •  " + Width + " × " + Height, ft, wBr,
                                     new RectangleF(tag.X + 8f, tag.Y, tag.Width - 12f, tag.Height), sfL);
                             }
-                            DrawCornerHandles(g, Color.FromArgb(255, 240, 160, 130));
+                            DrawCornerHandles(g, Color.FromArgb(255, 110, 231, 183));
                         }
 
                         string txt = TextContent;
@@ -490,7 +490,7 @@ namespace TranslatorLive
                                     float bh = 22f;
                                     float bx = st.Align == 1 ? Math.Max(pad, (Width - bw) * 0.5f) : (st.Align == 2 ? Math.Max(pad, Width - pad - bw) : pad);
                                     RectangleF badge = new RectangleF(bx, topPad, bw, bh);
-                                    Theme.FillRR(g, badge, 11f, Color.FromArgb(240, 217, 119, 87));
+                                    Theme.FillRR(g, badge, 11f, Color.FromArgb(240, 16, 185, 129));
                                     using (StringFormat sfB = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                                     using (SolidBrush wBr = new SolidBrush(Color.White))
                                         g.DrawString(SpeakerName, fs, wBr, badge, sfB);

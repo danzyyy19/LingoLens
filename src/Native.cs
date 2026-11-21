@@ -11,6 +11,7 @@ namespace TranslatorLive
         public const int WM_HOTKEY = 0x0312;
         public const int WM_DPICHANGED = 0x02E0;
         public const int WM_EXITSIZEMOVE = 0x0232;
+        public const int WM_GETMINMAXINFO = 0x0024;
 
         public const int HTCLIENT = 1;
         public const int HTCAPTION = 2;
@@ -44,6 +45,16 @@ namespace TranslatorLive
 
         [StructLayout(LayoutKind.Sequential)]
         public struct POINT { public int X, Y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MINMAXINFO
+        {
+            public POINT ptReserved;
+            public POINT ptMaxSize;
+            public POINT ptMaxPosition;
+            public POINT ptMinTrackSize;
+            public POINT ptMaxTrackSize;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct SIZE { public int CX, CY; }

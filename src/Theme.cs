@@ -37,7 +37,10 @@ namespace TranslatorLive
         ZoomOut,
         Gamepad,
         Save,
-        History
+        History,
+        Settings,
+        ScanArea,
+        Rocket
     }
 
     public class Palette
@@ -60,6 +63,7 @@ namespace TranslatorLive
         public Color AccentHover;
         public Color AccentSoft;
         public Color AccentText;
+        public Color AccentBtnText;
 
         public Color Live;
         public Color LiveHover;
@@ -74,57 +78,61 @@ namespace TranslatorLive
             p.Dark = dark;
             if (dark)
             {
-                p.Bg = Color.FromArgb(33, 32, 30);
-                p.Sidebar = Color.FromArgb(26, 25, 23);
-                p.Card = Color.FromArgb(42, 40, 37);
-                p.CardHover = Color.FromArgb(51, 49, 45);
-                p.Well = Color.FromArgb(28, 27, 25);
-                p.Border = Color.FromArgb(58, 55, 50);
-                p.BorderStrong = Color.FromArgb(78, 74, 68);
-                p.Shadow = Color.FromArgb(55, 0, 0, 0);
+                // Figma Minimalist UI Kit — Modern Dark Mode (Deep Zinc / Slate)
+                p.Bg = Color.FromArgb(9, 9, 11);               // #09090B deep matte black canvas
+                p.Sidebar = Color.FromArgb(14, 14, 17);         // #0E0E11 sidebar with subtle separation
+                p.Card = Color.FromArgb(24, 24, 27);            // #18181B (Zinc 900) card background
+                p.CardHover = Color.FromArgb(34, 34, 39);       // #222227 soft card hover
+                p.Well = Color.FromArgb(18, 18, 20);            // #121214 inset container well
+                p.Border = Color.FromArgb(39, 39, 42);          // #27272A (Zinc 800) 1px clean border
+                p.BorderStrong = Color.FromArgb(63, 63, 70);    // #3F3F46 (Zinc 700) prominent borders
+                p.Shadow = Color.FromArgb(80, 0, 0, 0);
 
-                p.Text = Color.FromArgb(238, 236, 230);
-                p.TextSub = Color.FromArgb(169, 165, 156);
-                p.TextMute = Color.FromArgb(124, 120, 112);
+                p.Text = Color.FromArgb(244, 244, 245);         // #F4F4F5 (Zinc 100) high contrast readable text
+                p.TextSub = Color.FromArgb(161, 161, 170);      // #A1A1AA (Zinc 400) secondary text
+                p.TextMute = Color.FromArgb(113, 113, 122);     // #71717A (Zinc 500) subtle muted text
 
-                p.Accent = Color.FromArgb(217, 119, 87);
-                p.AccentHover = Color.FromArgb(199, 101, 70);
-                p.AccentSoft = Color.FromArgb(38, 217, 119, 87);
-                p.AccentText = Color.FromArgb(235, 145, 114);
+                p.Accent = Color.FromArgb(250, 250, 250);       // #FAFAFA solid light primary button
+                p.AccentHover = Color.FromArgb(228, 228, 231);  // #E4E4E7 hover
+                p.AccentSoft = Color.FromArgb(39, 39, 42);      // #27272A
+                p.AccentText = Color.FromArgb(250, 250, 250);   // #FAFAFA
+                p.AccentBtnText = Color.FromArgb(9, 9, 11);     // #09090B high-contrast black text on button
 
-                p.Live = Color.FromArgb(45, 168, 122);
-                p.LiveHover = Color.FromArgb(34, 142, 102);
-                p.LiveSoft = Color.FromArgb(36, 45, 168, 122);
+                p.Live = Color.FromArgb(52, 211, 153);          // Emerald 400
+                p.LiveHover = Color.FromArgb(16, 185, 129);
+                p.LiveSoft = Color.FromArgb(30, 52, 211, 153);
 
-                p.Danger = Color.FromArgb(229, 92, 92);
-                p.DangerSoft = Color.FromArgb(36, 229, 92, 92);
+                p.Danger = Color.FromArgb(248, 113, 113);       // Red 400
+                p.DangerSoft = Color.FromArgb(30, 248, 113, 113);
             }
             else
             {
-                p.Bg = Color.FromArgb(250, 249, 245);
-                p.Sidebar = Color.FromArgb(243, 241, 234);
-                p.Card = Color.FromArgb(255, 255, 255);
-                p.CardHover = Color.FromArgb(246, 244, 238);
-                p.Well = Color.FromArgb(244, 242, 236);
-                p.Border = Color.FromArgb(230, 226, 216);
-                p.BorderStrong = Color.FromArgb(207, 202, 190);
-                p.Shadow = Color.FromArgb(14, 30, 25, 18);
+                // Figma Minimalist UI Kit — Modern Light Mode (Pure White, Neutral Gray, Solid Black Accents)
+                p.Bg = Color.FromArgb(248, 249, 250);           // #F8F9FA crisp off-white canvas
+                p.Sidebar = Color.FromArgb(255, 255, 255);      // #FFFFFF pure white sidebar with 1px border
+                p.Card = Color.FromArgb(255, 255, 255);         // #FFFFFF pure white card surface
+                p.CardHover = Color.FromArgb(244, 244, 245);    // #F4F4F5 (Zinc 100) hover
+                p.Well = Color.FromArgb(244, 244, 245);         // #F4F4F5 inset container well
+                p.Border = Color.FromArgb(228, 228, 231);       // #E4E4E7 (5% black stroke in Figma)
+                p.BorderStrong = Color.FromArgb(212, 212, 216); // #D4D4D8 (Zinc 300)
+                p.Shadow = Color.FromArgb(10, 0, 0, 0);         // soft subtle ambient shadow
 
-                p.Text = Color.FromArgb(31, 30, 28);
-                p.TextSub = Color.FromArgb(94, 90, 82);
-                p.TextMute = Color.FromArgb(142, 137, 128);
+                p.Text = Color.FromArgb(24, 24, 27);            // #18181B (Zinc 900) sharp dark text
+                p.TextSub = Color.FromArgb(113, 113, 122);      // #71717A (Zinc 500) clean subtext
+                p.TextMute = Color.FromArgb(161, 161, 170);     // #A1A1AA (Zinc 400) placeholders
+                
+                p.Accent = Color.FromArgb(24, 24, 27);          // #18181B solid dark primary button in Figma
+                p.AccentHover = Color.FromArgb(39, 39, 42);     // #27272A
+                p.AccentSoft = Color.FromArgb(244, 244, 245);   // #F4F4F5
+                p.AccentText = Color.FromArgb(24, 24, 27);      // #18181B
+                p.AccentBtnText = Color.White;                  // White text on dark button
 
-                p.Accent = Color.FromArgb(201, 100, 66);
-                p.AccentHover = Color.FromArgb(179, 84, 52);
-                p.AccentSoft = Color.FromArgb(28, 201, 100, 66);
-                p.AccentText = Color.FromArgb(182, 82, 48);
+                p.Live = Color.FromArgb(16, 185, 129);          // Emerald 500
+                p.LiveHover = Color.FromArgb(5, 150, 105);
+                p.LiveSoft = Color.FromArgb(25, 16, 185, 129);
 
-                p.Live = Color.FromArgb(28, 138, 97);
-                p.LiveHover = Color.FromArgb(20, 114, 79);
-                p.LiveSoft = Color.FromArgb(26, 28, 138, 97);
-
-                p.Danger = Color.FromArgb(204, 62, 62);
-                p.DangerSoft = Color.FromArgb(26, 204, 62, 62);
+                p.Danger = Color.FromArgb(239, 68, 68);         // Red 500
+                p.DangerSoft = Color.FromArgb(25, 239, 68, 68);
             }
             return p;
         }
@@ -133,31 +141,44 @@ namespace TranslatorLive
     public static class Theme
     {
         private static string _uiFontName;
-        private static string _serifFontName;
+        private static string _uiBoldFontName;
+        private static string _displayFontName;
 
         static Theme()
         {
             _uiFontName = PickFont("Segoe UI Variable Text", "Segoe UI");
-            _serifFontName = PickFont("Georgia", "Cambria");
+            _uiBoldFontName = PickFont("Segoe UI Variable Text Semibold", "Segoe UI Semibold", "Segoe UI");
+            _displayFontName = PickFont("Segoe UI Variable Display Semib", "Segoe UI Variable Display", "Segoe UI Semibold", "Segoe UI");
         }
 
-        private static string PickFont(string preferred, string fallback)
+        private static string PickFont(params string[] candidates)
         {
-            foreach (FontFamily ff in FontFamily.Families)
+            foreach (string preferred in candidates)
             {
-                if (string.Equals(ff.Name, preferred, StringComparison.OrdinalIgnoreCase)) return ff.Name;
+                foreach (FontFamily ff in FontFamily.Families)
+                {
+                    if (string.Equals(ff.Name, preferred, StringComparison.OrdinalIgnoreCase)) return ff.Name;
+                }
             }
-            return fallback;
+            return "Segoe UI";
         }
 
         public static Font SerifFont(float px, bool bold)
         {
-            return new Font(_serifFontName, px, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+            bool isSemiboldName = _displayFontName.IndexOf("Semibold", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                  _displayFontName.IndexOf("Semib", StringComparison.OrdinalIgnoreCase) >= 0;
+            return new Font(_displayFontName, px, (bold && !isSemiboldName) ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
         }
 
         public static Font UiFont(float px, bool bold)
         {
-            return new Font(_uiFontName, px, bold ? FontStyle.Bold : FontStyle.Regular, GraphicsUnit.Pixel);
+            if (bold)
+            {
+                bool isSemiboldName = _uiBoldFontName.IndexOf("Semibold", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                      _uiBoldFontName.IndexOf("Semib", StringComparison.OrdinalIgnoreCase) >= 0;
+                return new Font(_uiBoldFontName, px, isSemiboldName ? FontStyle.Regular : FontStyle.Bold, GraphicsUnit.Pixel);
+            }
+            return new Font(_uiFontName, px, FontStyle.Regular, GraphicsUnit.Pixel);
         }
 
         public static GraphicsPath RoundPath(RectangleF r, float rad)
@@ -194,7 +215,7 @@ namespace TranslatorLive
             using (Pen pen = new Pen(c, w)) g.DrawPath(pen, p);
         }
 
-        public static void DrawCard(Graphics g, Palette pal, RectangleF r, float rad = 14f)
+        public static void DrawCard(Graphics g, Palette pal, RectangleF r, float rad = 16f)
         {
             FillRR(g, new RectangleF(r.X, r.Y + 1.5f, r.Width, r.Height), rad, pal.Shadow);
             FillRR(g, r, rad, pal.Card);
@@ -234,194 +255,410 @@ namespace TranslatorLive
                 TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
         }
 
-        // PREMIUM MINIMALIST VECTOR ICONS (Lucide / Feather Precision)
+        // PREMIUM MINIMALIST VECTOR ICONS (Lucide / Feather / Figma Precision)
         public static void DrawIcon(Graphics g, IconKind k, RectangleF r, Color col, float sw = 1.6f)
         {
-            using (Pen p = new Pen(col, sw))
-            using (SolidBrush b = new SolidBrush(col))
+            if (k == IconKind.None || r.Width <= 0 || r.Height <= 0) return;
+
+            GraphicsState gs = g.Save();
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            try
             {
-                p.StartCap = LineCap.Round;
-                p.EndCap = LineCap.Round;
-                p.LineJoin = LineJoin.Round;
-
-                float x = r.X, y = r.Y, w = r.Width, h = r.Height;
-                float cx = x + w * 0.5f, cy = y + h * 0.5f;
-
-                switch (k)
+                using (Pen p = new Pen(col, sw))
+                using (SolidBrush b = new SolidBrush(col))
                 {
-                    case IconKind.Play:
-                        g.FillPolygon(b, new PointF[] { new PointF(x + w * 0.25f, y + h * 0.14f), new PointF(x + w * 0.85f, cy), new PointF(x + w * 0.25f, r.Bottom - h * 0.14f) });
-                        break;
-                    case IconKind.Stop:
-                        FillRR(g, new RectangleF(x + w * 0.18f, y + h * 0.18f, w * 0.64f, h * 0.64f), 2.2f, col);
-                        break;
-                    case IconKind.Plus:
-                        g.DrawLine(p, cx, y + h * 0.16f, cx, r.Bottom - h * 0.16f);
-                        g.DrawLine(p, x + w * 0.16f, cy, r.Right - w * 0.16f, cy);
-                        break;
-                    case IconKind.EditBox:
-                        DrawRR(g, new RectangleF(x + w * 0.10f, y + h * 0.10f, w * 0.80f, h * 0.80f), 2.5f, col, sw);
-                        g.DrawLine(p, x + w * 0.10f, y + h * 0.38f, r.Right - w * 0.10f, y + h * 0.38f);
-                        g.DrawLine(p, x + w * 0.38f, y + h * 0.38f, x + w * 0.38f, r.Bottom - h * 0.10f);
-                        break;
-                    case IconKind.Refresh:
-                        g.DrawArc(p, x + w * 0.12f, y + h * 0.12f, w * 0.76f, h * 0.76f, 20f, 300f);
-                        g.DrawLine(p, r.Right - w * 0.34f, y + h * 0.12f, r.Right - w * 0.12f, y + h * 0.34f);
-                        g.DrawLine(p, r.Right - w * 0.12f, y + h * 0.34f, r.Right - w * 0.38f, y + h * 0.36f);
-                        break;
-                    case IconKind.Eye:
-                        g.DrawArc(p, x + w * 0.08f, y + h * 0.22f, w * 0.84f, h * 0.56f, 0f, 360f);
-                        g.FillEllipse(b, cx - w * 0.15f, cy - h * 0.15f, w * 0.30f, h * 0.30f);
-                        break;
-                    case IconKind.Sun:
-                        g.DrawEllipse(p, cx - w * 0.20f, cy - h * 0.20f, w * 0.40f, h * 0.40f);
-                        for (int i = 0; i < 8; i++)
-                        {
-                            double a = i * Math.PI / 4.0;
-                            g.DrawLine(p, cx + (float)Math.Cos(a) * w * 0.32f, cy + (float)Math.Sin(a) * h * 0.32f,
-                                          cx + (float)Math.Cos(a) * w * 0.44f, cy + (float)Math.Sin(a) * h * 0.44f);
-                        }
-                        break;
-                    case IconKind.Moon:
-                        g.DrawArc(p, x + w * 0.16f, y + h * 0.16f, w * 0.68f, h * 0.68f, 45f, 250f);
-                        break;
-                    case IconKind.Tray:
-                        g.DrawLine(p, cx, y + h * 0.12f, cx, cy + h * 0.12f);
-                        g.DrawLine(p, cx - w * 0.20f, cy - h * 0.06f, cx, cy + h * 0.15f);
-                        g.DrawLine(p, cx + w * 0.20f, cy - h * 0.06f, cx, cy + h * 0.15f);
-                        g.DrawLine(p, x + w * 0.14f, cy + h * 0.14f, x + w * 0.14f, r.Bottom - h * 0.14f);
-                        g.DrawLine(p, x + w * 0.14f, r.Bottom - h * 0.14f, r.Right - w * 0.14f, r.Bottom - h * 0.14f);
-                        g.DrawLine(p, r.Right - w * 0.14f, r.Bottom - h * 0.14f, r.Right - w * 0.14f, cy + h * 0.14f);
-                        break;
-                    case IconKind.Minimize:
-                        g.DrawLine(p, x + w * 0.16f, cy, r.Right - w * 0.16f, cy);
-                        break;
-                    case IconKind.Maximize:
-                        DrawRR(g, new RectangleF(x + w * 0.16f, y + h * 0.16f, w * 0.68f, h * 0.68f), 2f, col, sw);
-                        break;
-                    case IconKind.Restore:
-                        DrawRR(g, new RectangleF(x + w * 0.14f, y + h * 0.28f, w * 0.58f, h * 0.58f), 1.5f, col, sw);
-                        g.DrawLine(p, x + w * 0.28f, y + h * 0.14f, r.Right - w * 0.14f, y + h * 0.14f);
-                        g.DrawLine(p, r.Right - w * 0.14f, y + h * 0.14f, r.Right - w * 0.14f, r.Bottom - h * 0.28f);
-                        break;
-                    case IconKind.Fullscreen:
-                        float fl = w * 0.24f;
-                        g.DrawLine(p, x + w * 0.12f, y + h * 0.12f + fl, x + w * 0.12f, y + h * 0.12f); g.DrawLine(p, x + w * 0.12f, y + h * 0.12f, x + w * 0.12f + fl, y + h * 0.12f);
-                        g.DrawLine(p, r.Right - w * 0.12f - fl, y + h * 0.12f, r.Right - w * 0.12f, y + h * 0.12f); g.DrawLine(p, r.Right - w * 0.12f, y + h * 0.12f, r.Right - w * 0.12f, y + h * 0.12f + fl);
-                        g.DrawLine(p, x + w * 0.12f, r.Bottom - h * 0.12f - fl, x + w * 0.12f, r.Bottom - h * 0.12f); g.DrawLine(p, x + w * 0.12f, r.Bottom - h * 0.12f, x + w * 0.12f + fl, r.Bottom - h * 0.12f);
-                        g.DrawLine(p, r.Right - w * 0.12f - fl, r.Bottom - h * 0.12f, r.Right - w * 0.12f, r.Bottom - h * 0.12f); g.DrawLine(p, r.Right - w * 0.12f, r.Bottom - h * 0.12f, r.Right - w * 0.12f, r.Bottom - h * 0.12f - fl);
-                        break;
-                    case IconKind.Close:
-                        g.DrawLine(p, x + w * 0.18f, y + h * 0.18f, r.Right - w * 0.18f, r.Bottom - h * 0.18f);
-                        g.DrawLine(p, r.Right - w * 0.18f, y + h * 0.18f, x + w * 0.18f, r.Bottom - h * 0.18f);
-                        break;
-                    case IconKind.Trash:
-                        // Crisp Trash Can: Top Handle + Lid + Tapered Bin + 2 Vertical Lines
-                        g.DrawLine(p, x + w * 0.36f, y + h * 0.14f, x + w * 0.64f, y + h * 0.14f);
-                        g.DrawLine(p, x + w * 0.16f, y + h * 0.26f, r.Right - w * 0.16f, y + h * 0.26f);
-                        g.DrawPolygon(p, new PointF[]
-                        {
-                            new PointF(x + w * 0.24f, y + h * 0.26f),
-                            new PointF(r.Right - w * 0.24f, y + h * 0.26f),
-                            new PointF(r.Right - w * 0.28f, r.Bottom - h * 0.14f),
-                            new PointF(x + w * 0.28f, r.Bottom - h * 0.14f)
-                        });
-                        g.DrawLine(p, x + w * 0.42f, y + h * 0.42f, x + w * 0.42f, r.Bottom - h * 0.26f);
-                        g.DrawLine(p, x + w * 0.58f, y + h * 0.42f, x + w * 0.58f, r.Bottom - h * 0.26f);
-                        break;
-                    case IconKind.Snap:
-                        // Crisp Target / Align-to-OCR Icon (Crosshair Anchor)
-                        g.DrawEllipse(p, x + w * 0.22f, y + h * 0.22f, w * 0.56f, h * 0.56f);
-                        g.FillEllipse(b, cx - w * 0.12f, cy - h * 0.12f, w * 0.24f, h * 0.24f);
-                        g.DrawLine(p, cx, y + h * 0.08f, cx, y + h * 0.22f);
-                        g.DrawLine(p, cx, r.Bottom - h * 0.22f, cx, r.Bottom - h * 0.08f);
-                        g.DrawLine(p, x + w * 0.08f, cy, x + w * 0.22f, cy);
-                        g.DrawLine(p, r.Right - w * 0.22f, cy, r.Right - w * 0.08f, cy);
-                        break;
-                    case IconKind.Crop:
-                        // Clean Crop Frame
-                        g.DrawLine(p, x + w * 0.26f, y + h * 0.10f, x + w * 0.26f, r.Bottom - h * 0.26f);
-                        g.DrawLine(p, x + w * 0.26f, r.Bottom - h * 0.26f, r.Right - w * 0.10f, r.Bottom - h * 0.26f);
-                        g.DrawLine(p, x + w * 0.10f, y + h * 0.26f, r.Right - w * 0.26f, y + h * 0.26f);
-                        g.DrawLine(p, r.Right - w * 0.26f, y + h * 0.26f, r.Right - w * 0.26f, r.Bottom - h * 0.10f);
-                        break;
-                    case IconKind.ResultBox:
-                        DrawRR(g, new RectangleF(x + w * 0.10f, y + h * 0.18f, w * 0.80f, h * 0.64f), 2.5f, col, sw);
-                        g.DrawLine(p, x + w * 0.26f, cy - h * 0.08f, r.Right - w * 0.26f, cy - h * 0.08f);
-                        g.DrawLine(p, x + w * 0.26f, cy + h * 0.12f, cx + w * 0.10f, cy + h * 0.12f);
-                        break;
-                    case IconKind.Swap:
-                        g.DrawLine(p, x + w * 0.14f, y + h * 0.34f, r.Right - w * 0.14f, y + h * 0.34f);
-                        g.DrawLine(p, r.Right - w * 0.34f, y + h * 0.18f, r.Right - w * 0.14f, y + h * 0.34f);
-                        g.DrawLine(p, r.Right - w * 0.34f, y + h * 0.50f, r.Right - w * 0.14f, y + h * 0.34f);
-                        g.DrawLine(p, r.Right - w * 0.14f, r.Bottom - h * 0.34f, x + w * 0.14f, r.Bottom - h * 0.34f);
-                        g.DrawLine(p, x + w * 0.34f, r.Bottom - h * 0.50f, x + w * 0.14f, r.Bottom - h * 0.34f);
-                        g.DrawLine(p, x + w * 0.34f, r.Bottom - h * 0.18f, x + w * 0.14f, r.Bottom - h * 0.34f);
-                        break;
-                    case IconKind.Copy:
-                        DrawRR(g, new RectangleF(x + w * 0.30f, y + h * 0.30f, w * 0.56f, h * 0.56f), 2f, col, sw);
-                        g.DrawLine(p, x + w * 0.16f, r.Bottom - h * 0.30f, x + w * 0.16f, y + h * 0.16f);
-                        g.DrawLine(p, x + w * 0.16f, y + h * 0.16f, r.Right - w * 0.30f, y + h * 0.16f);
-                        break;
-                    case IconKind.Check:
-                        g.DrawLine(p, x + w * 0.18f, cy, cx - w * 0.06f, r.Bottom - h * 0.22f);
-                        g.DrawLine(p, cx - w * 0.06f, r.Bottom - h * 0.22f, r.Right - w * 0.16f, y + h * 0.24f);
-                        break;
-                    case IconKind.Layers:
-                        PointF[] dm = new PointF[] { new PointF(cx, y + h * 0.12f), new PointF(r.Right - w * 0.12f, cy - h * 0.08f), new PointF(cx, cy + h * 0.12f), new PointF(x + w * 0.12f, cy - h * 0.08f) };
-                        g.DrawPolygon(p, dm);
-                        g.DrawLine(p, x + w * 0.14f, cy + h * 0.16f, cx, r.Bottom - h * 0.14f);
-                        g.DrawLine(p, cx, r.Bottom - h * 0.14f, r.Right - w * 0.14f, cy + h * 0.16f);
-                        break;
-                    case IconKind.Palette:
-                        g.DrawEllipse(p, x + w * 0.12f, y + h * 0.12f, w * 0.76f, h * 0.76f);
-                        g.FillEllipse(b, cx - w * 0.22f, cy - h * 0.16f, w * 0.15f, h * 0.15f);
-                        g.FillEllipse(b, cx + w * 0.08f, cy - h * 0.16f, w * 0.15f, h * 0.15f);
-                        g.FillEllipse(b, cx - w * 0.08f, cy + h * 0.10f, w * 0.15f, h * 0.15f);
-                        break;
-                    case IconKind.Sliders:
-                        g.DrawLine(p, x + w * 0.14f, y + h * 0.26f, r.Right - w * 0.14f, y + h * 0.26f);
-                        g.DrawLine(p, x + w * 0.14f, cy, r.Right - w * 0.14f, cy);
-                        g.DrawLine(p, x + w * 0.14f, r.Bottom - h * 0.26f, r.Right - w * 0.14f, r.Bottom - h * 0.26f);
-                        g.FillEllipse(b, x + w * 0.26f, y + h * 0.16f, w * 0.20f, h * 0.20f);
-                        g.FillEllipse(b, r.Right - w * 0.46f, cy - h * 0.10f, w * 0.20f, h * 0.20f);
-                        g.FillEllipse(b, cx - w * 0.10f, r.Bottom - h * 0.36f, w * 0.20f, h * 0.20f);
-                        break;
-                    case IconKind.Sparkle:
-                        float spR = w * 0.44f, spI = w * 0.14f;
-                        g.FillPolygon(b, new PointF[]
-                        {
-                            new PointF(cx, cy - spR), new PointF(cx + spI, cy - spI),
-                            new PointF(cx + spR, cy), new PointF(cx + spI, cy + spI),
-                            new PointF(cx, cy + spR), new PointF(cx - spI, cy + spI),
-                            new PointF(cx - spR, cy), new PointF(cx - spI, cy - spI)
-                        });
-                        break;
-                    case IconKind.ZoomIn:
-                        g.DrawLine(p, x + w * 0.22f, cy, r.Right - w * 0.22f, cy);
-                        g.DrawLine(p, cx, y + h * 0.22f, cx, r.Bottom - h * 0.22f);
-                        break;
-                    case IconKind.ZoomOut:
-                        g.DrawLine(p, x + w * 0.22f, cy, r.Right - w * 0.22f, cy);
-                        break;
-                    case IconKind.Gamepad:
-                        DrawRR(g, new RectangleF(x + w * 0.08f, y + h * 0.24f, w * 0.84f, h * 0.52f), h * 0.24f, col, sw);
-                        g.DrawLine(p, x + w * 0.28f, cy, x + w * 0.42f, cy);
-                        g.DrawLine(p, x + w * 0.35f, cy - h * 0.10f, x + w * 0.35f, cy + h * 0.10f);
-                        g.FillEllipse(b, r.Right - w * 0.36f, cy - h * 0.12f, w * 0.11f, h * 0.11f);
-                        g.FillEllipse(b, r.Right - w * 0.26f, cy + h * 0.02f, w * 0.11f, h * 0.11f);
-                        break;
-                    case IconKind.Save:
-                        DrawRR(g, new RectangleF(x + w * 0.14f, y + h * 0.14f, w * 0.72f, h * 0.72f), 2f, col, sw);
-                        g.DrawRectangle(p, x + w * 0.30f, y + h * 0.14f, w * 0.40f, h * 0.26f);
-                        g.DrawRectangle(p, x + w * 0.28f, r.Bottom - h * 0.38f, w * 0.44f, h * 0.24f);
-                        break;
-                    case IconKind.History:
-                        g.DrawArc(p, x + w * 0.14f, y + h * 0.14f, w * 0.72f, h * 0.72f, -150f, 300f);
-                        g.DrawLine(p, cx, y + h * 0.28f, cx, cy);
-                        g.DrawLine(p, cx, cy, cx + w * 0.18f, cy + h * 0.12f);
-                        break;
+                    p.StartCap = LineCap.Round;
+                    p.EndCap = LineCap.Round;
+                    p.LineJoin = LineJoin.Round;
+
+                    float x = r.X, y = r.Y, w = r.Width, h = r.Height;
+                    float cx = x + w * 0.5f, cy = y + h * 0.5f;
+
+                    switch (k)
+                    {
+                        case IconKind.Play:
+                            using (GraphicsPath gp = new GraphicsPath())
+                            {
+                                float px0 = x + w * 0.28f, px1 = r.Right - w * 0.20f;
+                                float py0 = y + h * 0.18f, py1 = r.Bottom - h * 0.18f;
+                                gp.AddLine(px0, py0, px1, cy);
+                                gp.AddLine(px1, cy, px0, py1);
+                                gp.CloseFigure();
+                                p.LineJoin = LineJoin.Round;
+                                g.DrawPath(p, gp);
+                                g.FillPath(b, gp);
+                            }
+                            break;
+
+                        case IconKind.Stop:
+                            FillRR(g, new RectangleF(x + w * 0.22f, y + h * 0.22f, w * 0.56f, h * 0.56f), 3.5f, col);
+                            break;
+
+                        case IconKind.Plus:
+                            float pPad = w * 0.24f;
+                            g.DrawLine(p, cx, y + pPad, cx, r.Bottom - pPad);
+                            g.DrawLine(p, x + pPad, cy, r.Right - pPad, cy);
+                            break;
+
+                        case IconKind.ScanArea:
+                            // Sleek Display Frame with Active Center Scanline
+                            RectangleF mon = new RectangleF(x + w * 0.12f, y + h * 0.14f, w * 0.76f, h * 0.54f);
+                            DrawRR(g, mon, 3f, col, sw);
+                            g.DrawLine(p, cx, mon.Bottom, cx, r.Bottom - h * 0.14f);
+                            g.DrawLine(p, cx - w * 0.20f, r.Bottom - h * 0.14f, cx + w * 0.20f, r.Bottom - h * 0.14f);
+                            // Laser scan beam + center focus dot
+                            float sY = mon.Y + mon.Height * 0.5f;
+                            g.DrawLine(p, mon.X + w * 0.12f, sY, mon.Right - w * 0.12f, sY);
+                            g.FillEllipse(b, cx - w * 0.05f, sY - h * 0.05f, w * 0.10f, h * 0.10f);
+                            break;
+
+                        case IconKind.EditBox:
+                            // Interactive Selection Bounding Box with 4 Solid Transform Anchor Handles
+                            RectangleF eBox = new RectangleF(x + w * 0.20f, y + h * 0.20f, w * 0.60f, h * 0.60f);
+                            DrawRR(g, eBox, 1.5f, col, sw * 0.9f);
+                            float hSz = Math.Max(3f, w * 0.12f);
+                            FillRR(g, new RectangleF(eBox.X - hSz * 0.5f, eBox.Y - hSz * 0.5f, hSz, hSz), 1f, col);
+                            FillRR(g, new RectangleF(eBox.Right - hSz * 0.5f, eBox.Y - hSz * 0.5f, hSz, hSz), 1f, col);
+                            FillRR(g, new RectangleF(eBox.X - hSz * 0.5f, eBox.Bottom - hSz * 0.5f, hSz, hSz), 1f, col);
+                            FillRR(g, new RectangleF(eBox.Right - hSz * 0.5f, eBox.Bottom - hSz * 0.5f, hSz, hSz), 1f, col);
+                            break;
+
+                        case IconKind.ResultBox:
+                            // Subtitle Speech Balloon with Subtitle Dialogue Lines
+                            RectangleF sb = new RectangleF(x + w * 0.13f, y + h * 0.14f, w * 0.74f, h * 0.52f);
+                            DrawRR(g, sb, 3f, col, sw);
+                            PointF[] tail = new PointF[] {
+                                new PointF(sb.X + w * 0.14f, sb.Bottom),
+                                new PointF(sb.X + w * 0.06f, r.Bottom - h * 0.14f),
+                                new PointF(sb.X + w * 0.28f, sb.Bottom)
+                            };
+                            g.DrawLines(p, tail);
+                            g.DrawLine(p, sb.X + w * 0.12f, cy - h * 0.06f, sb.Right - w * 0.12f, cy - h * 0.06f);
+                            g.DrawLine(p, sb.X + w * 0.12f, cy + h * 0.08f, sb.X + w * 0.44f, cy + h * 0.08f);
+                            break;
+
+                        case IconKind.Snap:
+                            // Precision Alignment Guide with Magnetic Snapping Guides
+                            g.DrawLine(p, cx, y + h * 0.12f, cx, r.Bottom - h * 0.12f);
+                            DrawRR(g, new RectangleF(x + w * 0.14f, cy - h * 0.20f, w * 0.26f, h * 0.40f), 2f, col, sw);
+                            DrawRR(g, new RectangleF(cx + w * 0.10f, cy - h * 0.20f, w * 0.26f, h * 0.40f), 2f, col, sw);
+                            break;
+
+                        case IconKind.Crop:
+                            // Precision Viewfinder Target: 4 sleek corner brackets + center crosshair
+                            float cLen = w * 0.22f;
+                            float x0 = x + w * 0.14f, x1 = r.Right - w * 0.14f;
+                            float y0 = y + h * 0.14f, y1 = r.Bottom - h * 0.14f;
+                            g.DrawLine(p, x0, y0 + cLen, x0, y0); g.DrawLine(p, x0, y0, x0 + cLen, y0);
+                            g.DrawLine(p, x1 - cLen, y0, x1, y0); g.DrawLine(p, x1, y0, x1, y0 + cLen);
+                            g.DrawLine(p, x0, y1 - cLen, x0, y1); g.DrawLine(p, x0, y1, x0 + cLen, y1);
+                            g.DrawLine(p, x1 - cLen, y1, x1, y1); g.DrawLine(p, x1, y1, x1, y1 - cLen);
+                            g.DrawLine(p, cx - w * 0.12f, cy, cx + w * 0.12f, cy);
+                            g.DrawLine(p, cx, cy - h * 0.12f, cx, cy + h * 0.12f);
+                            g.FillEllipse(b, cx - w * 0.04f, cy - h * 0.04f, w * 0.08f, h * 0.08f);
+                            break;
+
+                        case IconKind.Trash:
+                            // Modern Lucide Trash Can
+                            g.DrawLine(p, x + w * 0.14f, y + h * 0.24f, r.Right - w * 0.14f, y + h * 0.24f);
+                            DrawRR(g, new RectangleF(cx - w * 0.10f, y + h * 0.14f, w * 0.20f, h * 0.10f), 1f, col, sw);
+                            PointF[] can = new PointF[]
+                            {
+                                new PointF(x + w * 0.22f, y + h * 0.24f),
+                                new PointF(r.Right - w * 0.22f, y + h * 0.24f),
+                                new PointF(r.Right - w * 0.26f, r.Bottom - h * 0.15f),
+                                new PointF(x + w * 0.26f, r.Bottom - h * 0.15f)
+                            };
+                            g.DrawPolygon(p, can);
+                            g.DrawLine(p, cx - w * 0.08f, y + h * 0.36f, cx - w * 0.08f, r.Bottom - h * 0.24f);
+                            g.DrawLine(p, cx + w * 0.08f, y + h * 0.36f, cx + w * 0.08f, r.Bottom - h * 0.24f);
+                            break;
+
+                        case IconKind.Gamepad:
+                            // Sleek Ergonomic Gamepad with D-pad & 4 Action Buttons
+                            RectangleF gpBox = new RectangleF(x + w * 0.12f, y + h * 0.20f, w * 0.76f, h * 0.58f);
+                            DrawRR(g, gpBox, h * 0.24f, col, sw);
+                            float dpx = gpBox.X + w * 0.20f, dpy = cy + h * 0.02f;
+                            g.DrawLine(p, dpx - w * 0.08f, dpy, dpx + w * 0.08f, dpy);
+                            g.DrawLine(p, dpx, dpy - h * 0.08f, dpx, dpy + h * 0.08f);
+                            float abx = gpBox.Right - w * 0.20f, aby = cy + h * 0.02f;
+                            float bsz = Math.Max(2f, w * 0.06f);
+                            g.FillEllipse(b, abx - bsz * 0.5f, aby - h * 0.08f - bsz * 0.5f, bsz, bsz);
+                            g.FillEllipse(b, abx - bsz * 0.5f, aby + h * 0.08f - bsz * 0.5f, bsz, bsz);
+                            g.FillEllipse(b, abx - w * 0.08f - bsz * 0.5f, aby - bsz * 0.5f, bsz, bsz);
+                            g.FillEllipse(b, abx + w * 0.08f - bsz * 0.5f, aby - bsz * 0.5f, bsz, bsz);
+                            break;
+
+                        case IconKind.Swap:
+                            // Clean Dual Horizontal Directional Arrows
+                            float sy1 = cy - h * 0.14f, sy2 = cy + h * 0.14f;
+                            float sah = h * 0.10f;
+                            g.DrawLine(p, x + w * 0.16f, sy1, r.Right - w * 0.16f, sy1);
+                            g.DrawLine(p, r.Right - w * 0.28f, sy1 - sah, r.Right - w * 0.16f, sy1);
+                            g.DrawLine(p, r.Right - w * 0.28f, sy1 + sah, r.Right - w * 0.16f, sy1);
+                            g.DrawLine(p, r.Right - w * 0.16f, sy2, x + w * 0.16f, sy2);
+                            g.DrawLine(p, x + w * 0.28f, sy2 - sah, x + w * 0.16f, sy2);
+                            g.DrawLine(p, x + w * 0.28f, sy2 + sah, x + w * 0.16f, sy2);
+                            break;
+
+                        case IconKind.Eye:
+                            // Almond Shaped Precision Eye with Center Iris
+                            using (GraphicsPath ep = new GraphicsPath())
+                            {
+                                ep.AddBezier(x + w * 0.10f, cy, cx - w * 0.18f, y + h * 0.18f, cx + w * 0.18f, y + h * 0.18f, r.Right - w * 0.10f, cy);
+                                ep.AddBezier(r.Right - w * 0.10f, cy, cx + w * 0.18f, r.Bottom - h * 0.18f, cx - w * 0.18f, r.Bottom - h * 0.18f, x + w * 0.10f, cy);
+                                g.DrawPath(p, ep);
+                            }
+                            g.FillEllipse(b, cx - w * 0.11f, cy - h * 0.11f, w * 0.22f, h * 0.22f);
+                            break;
+
+                        case IconKind.Sun:
+                            // Sun Core + 8 Crisp Radial Rays
+                            float sunR = w * 0.18f;
+                            g.DrawEllipse(p, cx - sunR, cy - sunR, sunR * 2f, sunR * 2f);
+                            for (int i = 0; i < 8; i++)
+                            {
+                                double rad = i * Math.PI / 4.0;
+                                float cos = (float)Math.Cos(rad), sin = (float)Math.Sin(rad);
+                                g.DrawLine(p, cx + cos * w * 0.28f, cy + sin * h * 0.28f, cx + cos * w * 0.42f, cy + sin * h * 0.42f);
+                            }
+                            break;
+
+                        case IconKind.Moon:
+                            // Sleek Slender Crescent Moon (Zero chunky 'C' shape)
+                            using (GraphicsPath mp = new GraphicsPath())
+                            {
+                                PointF pTop = new PointF(cx + w * 0.14f, y + h * 0.12f);
+                                PointF pBot = new PointF(cx + w * 0.14f, r.Bottom - h * 0.12f);
+                                mp.AddBezier(pTop, new PointF(x + w * 0.06f, y + h * 0.22f), new PointF(x + w * 0.06f, r.Bottom - h * 0.22f), pBot);
+                                mp.AddBezier(pBot, new PointF(x + w * 0.28f, r.Bottom - h * 0.32f), new PointF(x + w * 0.28f, y + h * 0.32f), pTop);
+                                mp.CloseFigure();
+                                g.DrawPath(p, mp);
+                                g.FillPath(b, mp);
+                            }
+                            break;
+
+                        case IconKind.Tray:
+                            // Minimize to Tray: Window descending down into taskbar dock
+                            RectangleF winR = new RectangleF(x + w * 0.15f, y + h * 0.14f, w * 0.70f, h * 0.50f);
+                            DrawRR(g, winR, 2.5f, col, sw);
+                            g.DrawLine(p, winR.X, winR.Y + h * 0.15f, winR.Right, winR.Y + h * 0.15f);
+                            float dockY = r.Bottom - h * 0.14f;
+                            g.DrawLine(p, x + w * 0.15f, dockY, r.Right - w * 0.15f, dockY);
+                            float arrY1 = winR.Y + h * 0.22f, arrY2 = dockY - h * 0.05f;
+                            g.DrawLine(p, cx, arrY1, cx, arrY2);
+                            g.DrawLine(p, cx - w * 0.12f, arrY2 - h * 0.10f, cx, arrY2);
+                            g.DrawLine(p, cx + w * 0.12f, arrY2 - h * 0.10f, cx, arrY2);
+                            break;
+
+                        case IconKind.Sparkle:
+                            // Gemini Concave 4-Point AI Star
+                            using (GraphicsPath sp = new GraphicsPath())
+                            {
+                                float outR = w * 0.42f, inR = w * 0.10f;
+                                sp.AddLine(cx, cy - outR, cx + inR, cy - inR);
+                                sp.AddLine(cx + inR, cy - inR, cx + outR, cy);
+                                sp.AddLine(cx + outR, cy, cx + inR, cy + inR);
+                                sp.AddLine(cx + inR, cy + inR, cx, cy + outR);
+                                sp.AddLine(cx, cy + outR, cx - inR, cy + inR);
+                                sp.AddLine(cx - inR, cy + inR, cx - outR, cy);
+                                sp.AddLine(cx - outR, cy, cx - inR, cy - inR);
+                                sp.CloseFigure();
+                                g.FillPath(b, sp);
+                            }
+                            break;
+
+                        case IconKind.ZoomIn:
+                        case IconKind.ZoomOut:
+                            // Crisp Magnifying Glass with Badge Indicator
+                            float lr = w * 0.26f;
+                            float lcx = x + w * 0.16f + lr, lcy = y + h * 0.16f + lr;
+                            g.DrawEllipse(p, lcx - lr, lcy - lr, lr * 2f, lr * 2f);
+                            g.DrawLine(p, lcx + lr * 0.707f, lcy + lr * 0.707f, r.Right - w * 0.14f, r.Bottom - h * 0.14f);
+                            g.DrawLine(p, lcx - lr * 0.45f, lcy, lcx + lr * 0.45f, lcy);
+                            if (k == IconKind.ZoomIn)
+                                g.DrawLine(p, lcx, lcy - lr * 0.45f, lcx, lcy + lr * 0.45f);
+                            break;
+
+                        case IconKind.Save:
+                            // Floppy Disk with Shutter Notch and Label
+                            DrawRR(g, new RectangleF(x + w * 0.15f, y + h * 0.15f, w * 0.70f, h * 0.70f), 2.5f, col, sw);
+                            g.DrawRectangle(p, x + w * 0.30f, y + h * 0.15f, w * 0.40f, h * 0.24f);
+                            g.DrawLine(p, x + w * 0.38f, y + h * 0.19f, x + w * 0.38f, y + h * 0.33f);
+                            DrawRR(g, new RectangleF(x + w * 0.25f, cy + h * 0.06f, w * 0.50f, h * 0.32f), 1.5f, col, sw);
+                            break;
+
+                        case IconKind.Refresh:
+                            // Precision Dual-Arrow Circular Sync Loop (Lucide RefreshCw)
+                            float rR = w * 0.32f;
+                            RectangleF arcBox = new RectangleF(cx - rR, cy - rR, rR * 2f, rR * 2f);
+                            g.DrawArc(p, arcBox, -65f, 130f);
+                            double a65 = 65.0 * Math.PI / 180.0;
+                            float ax1 = cx + (float)Math.Cos(a65) * rR;
+                            float ay1 = cy + (float)Math.Sin(a65) * rR;
+                            g.DrawLine(p, ax1, ay1, ax1 - w * 0.13f, ay1);
+                            g.DrawLine(p, ax1, ay1, ax1, ay1 - h * 0.13f);
+
+                            g.DrawArc(p, arcBox, 115f, 130f);
+                            double a245 = 245.0 * Math.PI / 180.0;
+                            float ax2 = cx + (float)Math.Cos(a245) * rR;
+                            float ay2 = cy + (float)Math.Sin(a245) * rR;
+                            g.DrawLine(p, ax2, ay2, ax2 + w * 0.13f, ay2);
+                            g.DrawLine(p, ax2, ay2, ax2, ay2 + h * 0.13f);
+                            break;
+
+                        case IconKind.Minimize:
+                            g.DrawLine(p, x + w * 0.20f, cy, r.Right - w * 0.20f, cy);
+                            break;
+
+                        case IconKind.Maximize:
+                            DrawRR(g, new RectangleF(x + w * 0.20f, y + h * 0.20f, w * 0.60f, h * 0.60f), 2f, col, sw);
+                            break;
+
+                        case IconKind.Restore:
+                            DrawRR(g, new RectangleF(x + w * 0.18f, y + h * 0.30f, w * 0.52f, h * 0.52f), 1.5f, col, sw);
+                            g.DrawLine(p, x + w * 0.30f, y + h * 0.18f, r.Right - w * 0.18f, y + h * 0.18f);
+                            g.DrawLine(p, r.Right - w * 0.18f, y + h * 0.18f, r.Right - w * 0.18f, r.Bottom - h * 0.30f);
+                            break;
+
+                        case IconKind.Fullscreen:
+                            float fcl = w * 0.20f;
+                            g.DrawLine(p, x + w * 0.14f, y + h * 0.14f + fcl, x + w * 0.14f, y + h * 0.14f); g.DrawLine(p, x + w * 0.14f, y + h * 0.14f, x + w * 0.14f + fcl, y + h * 0.14f);
+                            g.DrawLine(p, r.Right - w * 0.14f - fcl, y + h * 0.14f, r.Right - w * 0.14f, y + h * 0.14f); g.DrawLine(p, r.Right - w * 0.14f, y + h * 0.14f, r.Right - w * 0.14f, y + h * 0.14f + fcl);
+                            g.DrawLine(p, x + w * 0.14f, r.Bottom - h * 0.14f - fcl, x + w * 0.14f, r.Bottom - h * 0.14f); g.DrawLine(p, x + w * 0.14f, r.Bottom - h * 0.14f, x + w * 0.14f + fcl, r.Bottom - h * 0.14f);
+                            g.DrawLine(p, r.Right - w * 0.14f - fcl, r.Bottom - h * 0.14f, r.Right - w * 0.14f, r.Bottom - h * 0.14f); g.DrawLine(p, r.Right - w * 0.14f, r.Bottom - h * 0.14f, r.Right - w * 0.14f, r.Bottom - h * 0.14f - fcl);
+                            break;
+
+                        case IconKind.Close:
+                            g.DrawLine(p, x + w * 0.22f, y + h * 0.22f, r.Right - w * 0.22f, r.Bottom - h * 0.22f);
+                            g.DrawLine(p, r.Right - w * 0.22f, y + h * 0.22f, x + w * 0.22f, r.Bottom - h * 0.22f);
+                            break;
+
+                        case IconKind.Copy:
+                            DrawRR(g, new RectangleF(x + w * 0.30f, y + h * 0.30f, w * 0.54f, h * 0.54f), 2f, col, sw);
+                            PointF[] bs = new PointF[] { new PointF(x + w * 0.16f, r.Bottom - h * 0.32f), new PointF(x + w * 0.16f, y + h * 0.16f), new PointF(r.Right - w * 0.32f, y + h * 0.16f) };
+                            g.DrawLines(p, bs);
+                            break;
+
+                        case IconKind.Check:
+                            g.DrawLine(p, x + w * 0.18f, cy + h * 0.02f, cx - w * 0.06f, r.Bottom - h * 0.24f);
+                            g.DrawLine(p, cx - w * 0.06f, r.Bottom - h * 0.24f, r.Right - w * 0.16f, y + h * 0.22f);
+                            break;
+
+                        case IconKind.Layers:
+                            PointF[] ld1 = new PointF[] { new PointF(cx, y + h * 0.14f), new PointF(r.Right - w * 0.14f, cy - h * 0.10f), new PointF(cx, cy + h * 0.08f), new PointF(x + w * 0.14f, cy - h * 0.10f) };
+                            g.DrawPolygon(p, ld1);
+                            g.DrawLine(p, x + w * 0.14f, cy + h * 0.08f, cx, cy + h * 0.26f);
+                            g.DrawLine(p, cx, cy + h * 0.26f, r.Right - w * 0.14f, cy + h * 0.08f);
+                            g.DrawLine(p, x + w * 0.14f, cy + h * 0.26f, cx, r.Bottom - h * 0.12f);
+                            g.DrawLine(p, cx, r.Bottom - h * 0.12f, r.Right - w * 0.14f, cy + h * 0.26f);
+                            break;
+
+                        case IconKind.Palette:
+                            // Authentic Lucide Artist Palette with Thumb Notch & Outer Color Drops
+                            float sx = w / 24f, sy = h / 24f;
+                            using (GraphicsPath pp = new GraphicsPath())
+                            {
+                                pp.AddBezier(new PointF(x + 12f * sx, y + 2f * sy), new PointF(x + 6.48f * sx, y + 2f * sy), new PointF(x + 2f * sx, y + 6.48f * sy), new PointF(x + 2f * sx, y + 12f * sy));
+                                pp.AddBezier(new PointF(x + 2f * sx, y + 12f * sy), new PointF(x + 2f * sx, y + 17.52f * sy), new PointF(x + 6.48f * sx, y + 22f * sy), new PointF(x + 12f * sx, y + 22f * sy));
+                                pp.AddBezier(new PointF(x + 12f * sx, y + 22f * sy), new PointF(x + 13.1f * sx, y + 22f * sy), new PointF(x + 13.8f * sx, y + 21.2f * sy), new PointF(x + 13.8f * sx, y + 20.3f * sy));
+                                pp.AddBezier(new PointF(x + 13.8f * sx, y + 20.3f * sy), new PointF(x + 13.8f * sx, y + 19.8f * sy), new PointF(x + 13.4f * sx, y + 19.3f * sy), new PointF(x + 13.1f * sx, y + 18.9f * sy));
+                                pp.AddBezier(new PointF(x + 13.1f * sx, y + 18.9f * sy), new PointF(x + 12.8f * sx, y + 18.5f * sy), new PointF(x + 12.6f * sx, y + 18.0f * sy), new PointF(x + 12.6f * sx, y + 17.5f * sy));
+                                pp.AddBezier(new PointF(x + 12.6f * sx, y + 17.5f * sy), new PointF(x + 12.6f * sx, y + 16.4f * sy), new PointF(x + 13.5f * sx, y + 15.5f * sy), new PointF(x + 14.6f * sx, y + 15.5f * sy));
+                                pp.AddLine(new PointF(x + 14.6f * sx, y + 15.5f * sy), new PointF(x + 16.6f * sx, y + 15.5f * sy));
+                                pp.AddBezier(new PointF(x + 16.6f * sx, y + 15.5f * sy), new PointF(x + 19.7f * sx, y + 15.5f * sy), new PointF(x + 22f * sx, y + 13.0f * sy), new PointF(x + 22f * sx, y + 9.9f * sy));
+                                pp.AddBezier(new PointF(x + 22f * sx, y + 9.9f * sy), new PointF(x + 22f * sx, y + 5.5f * sy), new PointF(x + 17.5f * sx, y + 2f * sy), new PointF(x + 12f * sx, y + 2f * sy));
+                                pp.CloseFigure();
+                                g.DrawPath(p, pp);
+                            }
+                            float dotR = Math.Max(1.4f, 1.2f * sx);
+                            g.FillEllipse(b, x + 8.5f * sx - dotR, y + 7.5f * sy - dotR, dotR * 2f, dotR * 2f);
+                            g.FillEllipse(b, x + 13.5f * sx - dotR, y + 6.5f * sy - dotR, dotR * 2f, dotR * 2f);
+                            g.FillEllipse(b, x + 17.5f * sx - dotR, y + 9.5f * sy - dotR, dotR * 2f, dotR * 2f);
+                            g.FillEllipse(b, x + 6.5f * sx - dotR, y + 12.5f * sy - dotR, dotR * 2f, dotR * 2f);
+                            break;
+
+                        case IconKind.Settings:
+                            // Precision 6-Tooth Mechanical Gear
+                            using (GraphicsPath gearP = new GraphicsPath())
+                            {
+                                float rOut = w * 0.40f;
+                                float rIn = w * 0.28f;
+                                for (int i = 0; i < 6; i++)
+                                {
+                                    double deg = i * 60.0;
+                                    double a1 = (deg - 14.0) * Math.PI / 180.0;
+                                    double a2 = (deg - 9.0) * Math.PI / 180.0;
+                                    double a3 = (deg + 9.0) * Math.PI / 180.0;
+                                    double a4 = (deg + 14.0) * Math.PI / 180.0;
+
+                                    PointF p1 = new PointF(cx + (float)Math.Cos(a1) * rIn, cy + (float)Math.Sin(a1) * rIn);
+                                    PointF p2 = new PointF(cx + (float)Math.Cos(a2) * rOut, cy + (float)Math.Sin(a2) * rOut);
+                                    PointF p3 = new PointF(cx + (float)Math.Cos(a3) * rOut, cy + (float)Math.Sin(a3) * rOut);
+                                    PointF p4 = new PointF(cx + (float)Math.Cos(a4) * rIn, cy + (float)Math.Sin(a4) * rIn);
+
+                                    if (i == 0) gearP.AddLine(p1, p2);
+                                    else { gearP.AddLine(gearP.GetLastPoint(), p1); gearP.AddLine(p1, p2); }
+                                    gearP.AddLine(p2, p3);
+                                    gearP.AddLine(p3, p4);
+                                }
+                                gearP.CloseFigure();
+                                g.DrawPath(p, gearP);
+                                float rHole = w * 0.13f;
+                                g.DrawEllipse(p, cx - rHole, cy - rHole, rHole * 2f, rHole * 2f);
+                            }
+                            break;
+
+                        case IconKind.Rocket:
+                            // Precision Lucide Aerodynamic Launch Rocket
+                            float rsx = w / 24f, rsy = h / 24f;
+                            using (GraphicsPath fuseP = new GraphicsPath())
+                            {
+                                fuseP.AddLine(new PointF(x + 9f * rsx, y + 12f * rsy), new PointF(x + 12f * rsx, y + 15f * rsy));
+                                fuseP.AddBezier(new PointF(x + 12f * rsx, y + 15f * rsy), new PointF(x + 16f * rsx, y + 13f * rsy), new PointF(x + 22f * rsx, y + 4.7f * rsy), new PointF(x + 22f * rsx, y + 2f * rsy));
+                                fuseP.AddBezier(new PointF(x + 22f * rsx, y + 2f * rsy), new PointF(x + 19.3f * rsx, y + 2f * rsy), new PointF(x + 11f * rsx, y + 8f * rsy), new PointF(x + 9f * rsx, y + 12f * rsy));
+                                fuseP.CloseFigure();
+                                g.DrawPath(p, fuseP);
+                            }
+                            float rPwh = Math.Max(2f, 1.6f * rsx);
+                            g.DrawEllipse(p, x + 15f * rsx - rPwh, y + 9f * rsy - rPwh, rPwh * 2f, rPwh * 2f);
+                            // Left fin
+                            g.DrawLine(p, x + 9f * rsx, y + 12f * rsy, x + 5f * rsx, y + 12f * rsy);
+                            g.DrawLine(p, x + 5f * rsx, y + 12f * rsy, x + 6.5f * rsx, y + 9f * rsy);
+                            g.DrawLine(p, x + 6.5f * rsx, y + 9f * rsy, x + 10.5f * rsx, y + 9f * rsy);
+                            // Right fin
+                            g.DrawLine(p, x + 12f * rsx, y + 15f * rsy, x + 12f * rsx, y + 19f * rsy);
+                            g.DrawLine(p, x + 12f * rsx, y + 19f * rsy, x + 15f * rsx, y + 17.5f * rsy);
+                            g.DrawLine(p, x + 15f * rsx, y + 17.5f * rsy, x + 15f * rsx, y + 13.5f * rsy);
+                            // Exhaust flame
+                            g.DrawLine(p, x + 9.5f * rsx, y + 14.5f * rsy, x + 5f * rsx, y + 19f * rsy);
+                            g.DrawLine(p, x + 8f * rsx, y + 13f * rsy, x + 4f * rsx, y + 17f * rsy);
+                            break;
+
+                        case IconKind.Sliders:
+                            float ly1 = y + h * 0.26f, ly2 = cy, ly3 = r.Bottom - h * 0.26f;
+                            g.DrawLine(p, x + w * 0.14f, ly1, r.Right - w * 0.14f, ly1);
+                            g.DrawLine(p, x + w * 0.14f, ly2, r.Right - w * 0.14f, ly2);
+                            g.DrawLine(p, x + w * 0.14f, ly3, r.Right - w * 0.14f, ly3);
+                            float skr = h * 0.09f;
+                            g.FillEllipse(b, x + w * 0.32f - skr, ly1 - skr, skr * 2f, skr * 2f);
+                            g.FillEllipse(b, r.Right - w * 0.34f - skr, ly2 - skr, skr * 2f, skr * 2f);
+                            g.FillEllipse(b, cx - skr, ly3 - skr, skr * 2f, skr * 2f);
+                            break;
+
+                        case IconKind.History:
+                            g.DrawEllipse(p, x + w * 0.15f, y + h * 0.15f, w * 0.70f, h * 0.70f);
+                            g.DrawLine(p, cx, y + h * 0.28f, cx, cy);
+                            g.DrawLine(p, cx, cy, cx + w * 0.16f, cy + h * 0.10f);
+                            break;
+                    }
                 }
+            }
+            finally
+            {
+                g.Restore(gs);
             }
         }
     }

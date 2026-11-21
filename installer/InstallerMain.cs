@@ -9,6 +9,15 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
 
+[assembly: AssemblyTitle("Setup-LingoLens")]
+[assembly: AssemblyDescription("Instalasi LingoLens - Penerjemah Layar Game Windows")]
+[assembly: AssemblyCompany("Danzyyy")]
+[assembly: AssemblyProduct("LingoLens")]
+[assembly: AssemblyCopyright("Copyright © 2026 Danzyyy")]
+[assembly: AssemblyVersion("0.2.0.0")]
+[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyInformationalVersion("0.2 Beta")]
+
 namespace TranslatorLiveInstaller
 {
     static class Program
@@ -107,7 +116,7 @@ namespace TranslatorLiveInstaller
 
             Label sub = new Label
             {
-                Text = "Penerjemah layar game real-time untuk Windows  •  v0.1 Beta by Danzyyy",
+                Text = "Penerjemah layar game real-time untuk Windows  •  v0.2 Beta by Danzyyy",
                 Font = new Font("Segoe UI", 9.5f),
                 ForeColor = Color.FromArgb(169, 165, 156),
                 AutoSize = true,
@@ -235,7 +244,7 @@ namespace TranslatorLiveInstaller
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\LingoLens"))
                 {
                     key.SetValue("DisplayName", "LingoLens");
-                    key.SetValue("DisplayVersion", "0.1.0");
+                    key.SetValue("DisplayVersion", "0.2.0");
                     key.SetValue("Publisher", "Danzyyy");
                     key.SetValue("DisplayIcon", targetExe);
                     key.SetValue("InstallLocation", _installDir);

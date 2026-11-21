@@ -20,7 +20,7 @@ jobs:
         shell: powershell
         run: |
           .\build.ps1
-          $ver = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "v0.1-beta" }
+          $ver = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "v0.2-beta" }
           $zipPath = "dist\LingoLens-$ver-Windows-x64.zip"
           Compress-Archive -Path "dist\LingoLens-Portable.exe", "README.md", "LICENSE" -DestinationPath $zipPath -Force
           Push-Location dist

@@ -44,6 +44,8 @@ namespace TranslatorLive
         private readonly Dictionary<int, string> _lastTransByArea = new Dictionary<int, string>();
         private readonly Dictionary<int, DateTime> _lastActiveUtc = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, bool> _idleHidden = new Dictionary<int, bool>();
+        private readonly Dictionary<int, string> _pendingOcrByArea = new Dictionary<int, string>();
+        private readonly Dictionary<int, int> _pendingCountByArea = new Dictionary<int, int>();
         private readonly Dictionary<string, string> _cache = new Dictionary<string, string>();
         private readonly object _cacheLock = new object();
 
@@ -64,10 +66,21 @@ namespace TranslatorLive
                 ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls12;
                 ServicePointManager.Expect100Continue = false;
                 ServicePointManager.UseNagleAlgorithm = false;
-                ServicePointManager.DefaultConnectionLimit = 12;
+                ServicePointManager.DefaultConnectionLimit = 24;
                 WebRequest.DefaultWebProxy = null;
             }
             catch { }
+
+            // Pre-warm HTTP connection to Google Cloud in background (eliminates cold-start TLS lag)
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                try
+                {
+                    string warmUrl = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1";
+                    HttpRequestFast(warmUrl, null, "application/x-www-form-urlencoded", 1800);
+                }
+                catch { }
+            });
 
             LoadInstalledOcrLanguages();
             _worker = new Thread(WorkerLoop);
@@ -105,6 +118,8 @@ namespace TranslatorLive
                 _lastTransByArea.Remove(areaId);
                 _lastActiveUtc.Remove(areaId);
                 _idleHidden.Remove(areaId);
+                _pendingOcrByArea.Remove(areaId);
+                _pendingCountByArea.Remove(areaId);
             }
         }
 
@@ -117,6 +132,8 @@ namespace TranslatorLive
                 _lastTransByArea.Clear();
                 _lastActiveUtc.Clear();
                 _idleHidden.Clear();
+                _pendingOcrByArea.Clear();
+                _pendingCountByArea.Clear();
             }
         }
 
@@ -245,7 +262,7 @@ namespace TranslatorLive
                 if (!forced && hasPrev)
                 {
                     float diff = ComputeDiffPercent(sig, prevSig);
-                    if (diff < 1.2f)
+                    if (diff < 2.0f)
                     {
                         CheckIdleTimeout(area.Id, autoHideSec);
                         return;
@@ -296,6 +313,8 @@ namespace TranslatorLive
                     {
                         _lastOcrByArea[area.Id] = "";
                         _lastTransByArea[area.Id] = "";
+                        _pendingOcrByArea[area.Id] = "";
+                        _pendingCountByArea[area.Id] = 0;
                         _idleHidden[area.Id] = true;
                         RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, "Kosong", false);
                     }
@@ -306,13 +325,60 @@ namespace TranslatorLive
                 _lastOcrByArea.TryGetValue(area.Id, out prevOcr);
                 _lastTransByArea.TryGetValue(area.Id, out prevTrans);
 
+                // Anti-Flicker & Semantic Similarity Check:
+                // Prevents minor punctuation/noise jitter from re-triggering translation and flip-flopping meanings!
                 if (!forced && !string.IsNullOrEmpty(prevOcr) && !string.IsNullOrEmpty(prevTrans))
                 {
-                    if (ComputeSimilarity(cleanText, prevOcr) >= 0.94f)
+                    string coreNew = NormalizeCoreText(cleanText);
+                    string corePrev = NormalizeCoreText(prevOcr);
+
+                    // 1. Exact core semantic match: words are identical despite punctuation/quote jitter!
+                    if (coreNew == corePrev)
                     {
+                        _lastActiveUtc[area.Id] = DateTime.UtcNow;
                         CheckIdleTimeout(area.Id, autoHideSec);
-                        return;
+                        return; // Identical core words: KEEP DISPLAYED RESULT, DO NOT RE-TRANSLATE
                     }
+
+                    // 2. High semantic similarity / 1-2 char OCR noise check
+                    int dist = LevenshteinDistance(coreNew, corePrev);
+                    int maxLen = Math.Max(coreNew.Length, corePrev.Length);
+                    bool isSameSentence = false;
+
+                    if (maxLen <= 25 && dist <= 1) isSameSentence = true;
+                    else if (maxLen <= 60 && dist <= 2) isSameSentence = true;
+                    else if (ComputeSimilarity(coreNew, corePrev) >= 0.86f) isSameSentence = true;
+
+                    if (isSameSentence)
+                    {
+                        _lastActiveUtc[area.Id] = DateTime.UtcNow;
+                        CheckIdleTimeout(area.Id, autoHideSec);
+                        return; // Same sentence: DO NOT FLICKER
+                    }
+                }
+
+                // Typewriter / Sequential Subtitle Typing Debouncing:
+                // If text is expanding letter-by-letter in a game and hasn't ended in terminal punctuation,
+                // wait 1 frame for the typewriter animation to settle so we don't display 5 changing partial translations!
+                if (!forced && !treatAsChoice)
+                {
+                    bool isTerminal = EndsWithTerminalPunctuation(cleanText);
+                    string pendingText;
+                    _pendingOcrByArea.TryGetValue(area.Id, out pendingText);
+                    int pendingCount;
+                    _pendingCountByArea.TryGetValue(area.Id, out pendingCount);
+
+                    if (!isTerminal && !string.IsNullOrEmpty(pendingText) && cleanText.Length > pendingText.Length && cleanText.StartsWith(pendingText, StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (pendingCount < 2) // wait up to 2 ticks (~200ms) for typing to complete
+                        {
+                            _pendingOcrByArea[area.Id] = cleanText;
+                            _pendingCountByArea[area.Id] = pendingCount + 1;
+                            return; // wait for sentence to complete typing
+                        }
+                    }
+                    _pendingOcrByArea[area.Id] = cleanText;
+                    _pendingCountByArea[area.Id] = 0;
                 }
 
                 string speakerName = "";
@@ -464,14 +530,122 @@ namespace TranslatorLive
             if (srcLang != "en" && srcLang != "auto") return text;
 
             string s = text;
-            s = Regex.Replace(s, @"\b[Cc]atch me up\b", "follow and meet me");
-            s = Regex.Replace(s, @"\b[Cc]atch up with me\b", "follow and meet me");
-            s = Regex.Replace(s, @"\b[Cc]atch up later\b", "meet up later");
-            s = Regex.Replace(s, @"\b[Hh]ang in there\b", "stay strong");
-            s = Regex.Replace(s, @"\b[Nn]ever mind\b", "forget it");
-            s = Regex.Replace(s, @"\b[Yy]ou bet\b", "of course");
-            s = Regex.Replace(s, @"\b[Mm]ake up your mind\b", "decide quickly");
-            s = Regex.Replace(s, @"\b[Gg]ive me a break\b", "spare me");
+            // Catch idioms & follow up
+            s = Regex.Replace(s, @"\b[Cc]atch\s+(?:me\s+)?up\s+later\b", "meet me later");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+up\s+later\b", "meet up later");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+up\s+with\s+me\b", "follow and meet me");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+up\s+with\s+us\b", "follow and meet us");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+up\s+with\s+you\b", "meet you later");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+(?:you|ya)\s+later\b", "see you later");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+me\s+later\b", "meet me later");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+me\s+if\s+you\s+can\b", "chase me if you can");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+me\s+up\b", "tell me what happened");
+            s = Regex.Replace(s, @"\b[Cc]atch\s+up\b", "meet up");
+            s = Regex.Replace(s, @"\b(?:I'll|I\s+will)\s+catch\s+up\b", "I will follow you");
+            s = Regex.Replace(s, @"\b[Dd]id\s+you\s+catch\s+that\b", "did you understand that");
+
+            // Game & combat dialogue expressions
+            s = Regex.Replace(s, @"\bI('ve|\s+have)?\s+got\s+this\b", "leave this to me");
+            s = Regex.Replace(s, @"\bI('ve|\s+have)?\s+got\s+your\s+back\b", "I will protect you");
+            s = Regex.Replace(s, @"\bI('ve|\s+have)?\s+got\s+it\b", "I understand");
+            s = Regex.Replace(s, @"\b[Hh]ang\s+in\s+there\b", "stay strong");
+            s = Regex.Replace(s, @"\b[Hh]old\s+on\s+a\s+(?:sec|second|minute|moment)\b", "wait a moment");
+            s = Regex.Replace(s, @"\b[Hh]old\s+on\b", "wait a minute");
+            s = Regex.Replace(s, @"\b[Hh]ang\s+on\b", "wait a minute");
+            s = Regex.Replace(s, @"\b[Ww]atch\s+out\b", "be careful");
+            s = Regex.Replace(s, @"\b[Ll]ook\s+out\b", "be careful");
+            s = Regex.Replace(s, @"\b[Hh]eads\s+up\b", "be careful");
+            s = Regex.Replace(s, @"\b[Ww]hat's\s+up\b", "what is happening");
+            s = Regex.Replace(s, @"\b[Ww]hat's\s+wrong\b", "what is the problem");
+            s = Regex.Replace(s, @"\b[Ww]hat's\s+the\s+matter\b", "what is the problem");
+            s = Regex.Replace(s, @"\b[Ww]hat\s+are\s+you\s+up\s+to\b", "what are you doing");
+            s = Regex.Replace(s, @"\b[Ww]hat('s|\s+is)\s+going\s+on\b", "what is happening");
+            s = Regex.Replace(s, @"\b[Nn]o\s+way\b", "impossible");
+            s = Regex.Replace(s, @"\b[Aa]re\s+you\s+kidding(?:\s+me)?\b", "are you joking");
+            s = Regex.Replace(s, @"\b[Aa]re\s+you\s+for\s+real\b", "are you serious");
+            s = Regex.Replace(s, @"\b[Pp]iece\s+of\s+cake\b", "very easy");
+            s = Regex.Replace(s, @"\b[Gg]ive\s+me\s+a\s+break\b", "spare me");
+            s = Regex.Replace(s, @"\b[Dd]on't\s+sweat\s+it\b", "do not worry");
+            s = Regex.Replace(s, @"\b[Nn]o\s+worries\b", "do not worry");
+            s = Regex.Replace(s, @"\b[Tt]ake\s+care\b", "be safe");
+            s = Regex.Replace(s, @"\b[Nn]ever\s+mind\b", "forget it");
+            s = Regex.Replace(s, @"\b[Yy]ou\s+bet\b", "of course");
+            s = Regex.Replace(s, @"\b[Mm]ake\s+up\s+your\s+mind\b", "decide quickly");
+            s = Regex.Replace(s, @"\b[Cc]ut\s+it\s+out\b", "stop doing that");
+            s = Regex.Replace(s, @"\b[Gg]ive\s+it\s+a\s+shot\b", "try it");
+            s = Regex.Replace(s, @"\b[Gg]ive\s+it\s+a\s+try\b", "try it");
+            s = Regex.Replace(s, @"\b[Ss]hut\s+up\b", "be quiet");
+            s = Regex.Replace(s, @"\b[Gg]et\s+lost\b", "go away");
+            s = Regex.Replace(s, @"\b[Bb]eat\s+it\b", "go away");
+            s = Regex.Replace(s, @"\b[Bb]ack\s+off\b", "step back");
+            s = Regex.Replace(s, @"\b[Tt]ake\s+it\s+easy\b", "relax");
+            s = Regex.Replace(s, @"\b[Ff]air\s+enough\b", "sounds reasonable");
+            s = Regex.Replace(s, @"\b[Ss]ounds\s+good\b", "sounds good");
+            s = Regex.Replace(s, @"\b[Bb]y\s+the\s+way\b", "incidentally");
+            s = Regex.Replace(s, @"\b[Ii]t's\s+up\s+to\s+you\b", "you decide");
+            s = Regex.Replace(s, @"\b[Aa]s\s+soon\s+as\s+possible\b", "immediately");
+            s = Regex.Replace(s, @"\b[Cc]heck\s+this\s+out\b", "look at this");
+            s = Regex.Replace(s, @"\b[Cc]heck\s+it\s+out\b", "look at this");
+            s = Regex.Replace(s, @"\b[Ff]or\s+real\b", "seriously");
+            s = Regex.Replace(s, @"\b[Cc]alm\s+down\b", "stay calm");
+            s = Regex.Replace(s, @"\b[Cc]ome\s+on\b", "hurry up");
+            s = Regex.Replace(s, @"\bI\s+have\s+no\s+idea\b", "I do not know at all");
+            s = Regex.Replace(s, @"\bI\s+don't\s+have\s+a\s+clue\b", "I do not know at all");
+            s = Regex.Replace(s, @"\b[Ll]ong\s+time\s+no\s+see\b", "long time no see");
+            s = Regex.Replace(s, @"\b[Ll]et\s+me\s+see\b", "let me check");
+            s = Regex.Replace(s, @"\b[Oo]ut\s+of\s+the\s+way\b", "move aside");
+            s = Regex.Replace(s, @"\b[Ss]tep\s+aside\b", "move aside");
+            s = Regex.Replace(s, @"\b[Dd]on't\s+give\s+up\b", "do not give up");
+
+            // Additional gaming dialogue expressions
+            s = Regex.Replace(s, @"\b[Ll]ook\s+who('s|\s+is)\s+here\b", "look who is arriving");
+            s = Regex.Replace(s, @"\b[Mm]ake\s+yourself\s+at\s+home\b", "feel comfortable");
+            s = Regex.Replace(s, @"\b[Ss]tep\s+on\s+it\b", "hurry up");
+            s = Regex.Replace(s, @"\b[Kk]eep\s+your\s+chin\s+up\b", "stay strong");
+            s = Regex.Replace(s, @"\b[Cc]ount\s+me\s+in\b", "I will join");
+            s = Regex.Replace(s, @"\b[Cc]ount\s+me\s+out\b", "I will not join");
+            s = Regex.Replace(s, @"\b(?:I'm\s+)?on\s+my\s+way\b", "I am coming soon");
+            s = Regex.Replace(s, @"\b[Tt]ake\s+a\s+look\b", "look at this");
+            s = Regex.Replace(s, @"\b[Tt]ake\s+your\s+time\b", "do not rush");
+            s = Regex.Replace(s, @"\b[Cc]all\s+it\s+a\s+day\b", "finish for today");
+            s = Regex.Replace(s, @"\b[Gg]et\s+a\s+grip\b", "calm yourself down");
+            s = Regex.Replace(s, @"\b[Oo]ut\s+of\s+the\s+blue\b", "suddenly");
+            s = Regex.Replace(s, @"\b[Hh]ands\s+off\b", "do not touch");
+            s = Regex.Replace(s, @"\b[Dd]on't\s+you\s+dare\b", "do not dare");
+            s = Regex.Replace(s, @"\b[Hh]ang\s+tight\b", "wait a minute");
+            s = Regex.Replace(s, @"\b[Ss]uit\s+yourself\b", "it is your choice");
+            s = Regex.Replace(s, @"\b[Mm]y\s+bad\b", "my mistake");
+            s = Regex.Replace(s, @"\b[Nn]o\s+big\s+deal\b", "not a big problem");
+            s = Regex.Replace(s, @"\b[Nn]o\s+biggie\b", "not a big problem");
+            s = Regex.Replace(s, @"\b[Ss]o\s+far\s+so\s+good\b", "everything is fine so far");
+            s = Regex.Replace(s, @"\b[Yy]ou\s+nailed\s+it\b", "you did great");
+            s = Regex.Replace(s, @"\b[Ww]ay\s+to\s+go\b", "great job");
+            s = Regex.Replace(s, @"\b[Ll]et\s+me\s+know\b", "tell me later");
+            s = Regex.Replace(s, @"\b[Kk]eep\s+in\s+touch\b", "stay connected");
+            s = Regex.Replace(s, @"\bI'm\s+exhausted\b", "I am very tired");
+            s = Regex.Replace(s, @"\bI'm\s+starving\b", "I am very hungry");
+            s = Regex.Replace(s, @"\b[Nn]ot\s+at\s+all\b", "not at all");
+            s = Regex.Replace(s, @"\b[Bb]y\s+all\s+means\b", "please proceed");
+            s = Regex.Replace(s, @"\b[Aa]re\s+you\s+(?:crazy|insane|out\s+of\s+your\s+mind)\b", "are you crazy");
+            s = Regex.Replace(s, @"\b[Ww]hat\s+on\s+earth\b|\b[Ww]hat\s+the\s+heck\b", "what is happening");
+            s = Regex.Replace(s, @"\b[Gg]et\s+out\s+of\s+my\s+way\b", "move away");
+            s = Regex.Replace(s, @"\b[Ll]eave\s+me\s+alone\b", "do not disturb me");
+            s = Regex.Replace(s, @"\b[Ww]atch\s+your\s+back\b", "be careful");
+            s = Regex.Replace(s, @"\b[Dd]on't\s+let\s+your\s+guard\s+down\b", "stay alert");
+            s = Regex.Replace(s, @"\b[Ii]t's\s+about\s+time\b", "finally the time has come");
+            s = Regex.Replace(s, @"\b[Bb]etter\s+late\s+than\s+never\b", "better late than never");
+            s = Regex.Replace(s, @"\b[Ii]n\s+the\s+nick\s+of\s+time\b", "just in time");
+            s = Regex.Replace(s, @"\b[Pp]ull\s+yourself\s+together\b", "calm down");
+            s = Regex.Replace(s, @"\bI\s+owe\s+you\s+one\b", "I am grateful to you");
+            s = Regex.Replace(s, @"\b[Yy]ou\s+can\s+say\s+that\s+again\b", "I completely agree");
+
+            // Gaming entities & sacred titles (Zelda, Elden Ring, RPGs)
+            s = Regex.Replace(s, @"\b[Tt]he\s+Great\s+Deku\s+Tree\b", "The Great Deku Tree");
+            s = Regex.Replace(s, @"\bGreat\s+Deku\s+Tree\b", "Great Deku Tree");
+            s = Regex.Replace(s, @"\bMaster\s+Sword\b", "Master Sword");
+            s = Regex.Replace(s, @"\bGreat\s+Fairy\b", "Great Fairy");
+            s = Regex.Replace(s, @"\bGreat\s+Plateau\b", "Great Plateau");
+
             return s;
         }
 
@@ -481,36 +655,169 @@ namespace TranslatorLive
 
             string s = translated;
 
-            // Fix literal idiom leftovers
-            s = Regex.Replace(s, @"\b[Tt]angkap aku nanti\b", "Susul aku nanti");
-            s = Regex.Replace(s, @"\b[Tt]angkap saya nanti\b", "Susul aku nanti");
-            s = Regex.Replace(s, @"\b[Mm]engejarku nanti\b", "menyusulku nanti");
-            s = Regex.Replace(s, @"\bikuti dan temui aku\b", "susul aku", RegexOptions.IgnoreCase);
-            s = Regex.Replace(s, @"\bikuti dan temui saya\b", "susul aku", RegexOptions.IgnoreCase);
+            // 1. Fix literal idiom leftovers (Game Idioms & robotic artifacts)
+            s = Regex.Replace(s, @"\b[Pp]ohon\s+[Dd]eku\s+(?:yang\s+)?baik\b", "Pohon Deku Agung", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Pp]ohon\s+[Dd]eku\s+hebat\b", "Pohon Deku Agung", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Pp]edang\s+(?:tuan|guru|ahli)\b", "Master Sword", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Pp]eri\s+(?:yang\s+)?baik\b", "Peri Agung", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Pp]eri\s+hebat\b", "Peri Agung", RegexOptions.IgnoreCase);
 
-            // Everyday polite conversational Indonesian (natural, not stiff/formal)
-            s = Regex.Replace(s, @"\bAnda\b", "Kamu");
+            s = Regex.Replace(s, @"\b[Tt]angkap\s+(?:aku|saya|kami)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Tt]angkap\s+(?:kamu|anda|kalian)\s+nanti\b", "sampai ketemu nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Tt]angkap\s+nanti\b", "ketemu nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Mm]enangkap\s+(?:aku|saya)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Mm]enangkap\s+(?:kamu|anda)\s+nanti\b", "sampai ketemu nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Mm]engejar\s+(?:aku|saya)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Mm]engejarku\s+nanti\b", "menyusulku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Mm]engejar\s+nanti\b", "susul nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Mm]enyusul\s+(?:aku|saya)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Tt]angkap\s+(?:aku|saya)\s+jika\s+(?:kamu|anda)\s+bisa\b", "kejar aku kalau bisa", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bikuti\s+dan\s+temui\s+(?:aku|saya)\b", "susul aku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btemui\s+(?:aku|saya)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmenemui\s+(?:aku|saya)\s+nanti\b", "susul aku nanti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmenemui\s+(?:kamu|anda)\s+nanti\b", "ketemu nanti", RegexOptions.IgnoreCase);
+
+            s = Regex.Replace(s, @"\b(?:[Ss]aya|[Aa]ku)\s+punya\s+ini\b", "biar aku yang urus");
+            s = Regex.Replace(s, @"\b(?:[Ss]aya|[Aa]ku)\s+punya\s+punggungmu\b", "aku jagain kamu");
+            s = Regex.Replace(s, @"\b[Ss]aya\s+mengerti\b", "aku paham");
+            s = Regex.Replace(s, @"\bsaya\s+mengerti\b", "aku paham");
+            s = Regex.Replace(s, @"\b(?:[Ss]aya|[Aa]ku)\s+melihat(?=[\.\,\!\?]|\s*$)", "begitu ya");
+            s = Regex.Replace(s, @"\b[Aa]pa\s+yang\s+salah\b", "ada apa");
+            s = Regex.Replace(s, @"\bapa\s+yang\s+salah\b", "ada apa");
+            s = Regex.Replace(s, @"\b[Aa]da\s+apa\s+yang\s+salah\b", "ada apa");
+            s = Regex.Replace(s, @"\b[Aa]pa\s+yang\s+sedang\s+(?:kamu|anda)\s+lakukan\b", "kamu lagi ngapain");
+            s = Regex.Replace(s, @"\bapa\s+yang\s+sedang\s+(?:kamu|anda)\s+lakukan\b", "kamu lagi ngapain");
+            s = Regex.Replace(s, @"\b[Aa]pa\s+yang\s+sedang\s+terjadi\b", "lagi ada apa ini");
+            s = Regex.Replace(s, @"\bapa\s+yang\s+sedang\s+terjadi\b", "lagi ada apa ini");
+            s = Regex.Replace(s, @"\b[Aa]pa\s+yang\s+(?:kamu|anda)\s+bicarakan\b", "kamu ngomong apa sih");
+            s = Regex.Replace(s, @"\b[Aa]pa\s+arti\s+yang\s+(?:kamu|anda)\s+maksud\b", "maksud kamu apa");
+            s = Regex.Replace(s, @"\b[Aa]pa\s+yang\s+(?:kamu|anda)\s+maksud\b", "maksud kamu apa");
+            s = Regex.Replace(s, @"\b[Ss]epotong\s+kue\b", "gampang banget");
+            s = Regex.Replace(s, @"\b[Bb]eri\s+aku\s+istirahat\b", "yang bener aja");
+            s = Regex.Replace(s, @"\b[Bb]ertahanlah\s+di\s+sana\b", "bertahanlah");
+            s = Regex.Replace(s, @"\b[Bb]erpegang\s+teguh\b", "bertahanlah");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+ada\s+cara\b", "gak mungkin");
+            s = Regex.Replace(s, @"\b[Tt]inggalkan\s+ini\s+padaku\b", "biar aku yang urus");
+            s = Regex.Replace(s, @"\b[Kk]epala\s+ke\s+atas\b", "awas");
+            s = Regex.Replace(s, @"\b[Jj]angan\s+khawatir\s+tentang\s+itu\b", "tenang aja");
+            s = Regex.Replace(s, @"\b[Jj]angan\s+khawatir\b", "tenang aja");
+            s = Regex.Replace(s, @"\b[Jj]angan\s+takut\b", "gak usah takut");
+            s = Regex.Replace(s, @"\b[Bb]aik-baik\s+saja\b", "baik-baik aja");
+
+            // 2. Conversational Negations ("tidak" -> "gak" for natural gaming Indonesian)
+            s = Regex.Replace(s, @"\b[Tt]idak\s+apa-apa\b|\b[Tt]ak\s+apa-apa\b", "gak apa-apa");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+masalah\b", "gak masalah");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+bisa\b|\b[Tt]ak\s+bisa\b|\b[Tt]idak\s+dapat\b|\b[Tt]ak\s+dapat\b", "gak bisa");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+ada\b|\b[Tt]ak\s+ada\b", "gak ada");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+tahu\b|\b[Tt]ak\s+tahu\b", "gak tahu");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+mau\b|\b[Tt]ak\s+mau\b", "gak mau");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+akan\b|\b[Tt]ak\s+akan\b|\b[Tt]akkan\b", "gak bakal");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+boleh\b|\b[Tt]ak\s+boleh\b", "gak boleh");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+mungkin\b|\b[Tt]ak\s+mungkin\b", "gak mungkin");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+perlu\b|\b[Tt]ak\s+perlu\b|\b[Tt]idak\s+usah\b", "gak usah");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+suka\b", "gak suka");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+peduli\b", "gak peduli");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+pernah\b", "gak pernah");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+benar\b", "gak bener");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+adil\b", "gak adil");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+jelas\b", "gak jelas");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+percaya\b", "gak percaya");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+sempat\b", "gak keburu");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+kenal\b", "gak kenal");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+enak\b", "gak enak");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+sanggup\b", "gak sanggup");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+kelihatan\b", "gak kelihatan");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+terlalu\b", "gak terlalu");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+sama\b", "gak sama");
+            s = Regex.Replace(s, @"\b[Tt]idak\s+begitu\b", "gak begitu");
+            s = Regex.Replace(s, @"\b[Tt]idak!\b", "Gak!");
+            s = Regex.Replace(s, @"\b[Tt]idak,\b", "Gak,");
+            s = Regex.Replace(s, @"\btidak\b", "gak");
+
+            // 3. Pronouns & Conversational Polish (eliminating robotic formal speech)
+            s = Regex.Replace(s, @"\bAnda\b", "kamu");
             s = Regex.Replace(s, @"\banda\b", "kamu");
-            s = Regex.Replace(s, @"\bSaya\b", "Aku");
+            s = Regex.Replace(s, @"\bSaya\b", "aku");
             s = Regex.Replace(s, @"\bsaya\b", "aku");
-            s = Regex.Replace(s, @"\bApakah\b", "Apa");
+            s = Regex.Replace(s, @"\bApakah\b", "apa");
             s = Regex.Replace(s, @"\bapakah\b", "apa");
-            s = Regex.Replace(s, @"\bMengapa\b", "Kenapa");
+            s = Regex.Replace(s, @"\bMengapa\b", "kenapa");
             s = Regex.Replace(s, @"\bmengapa\b", "kenapa");
-            s = Regex.Replace(s, @"\bBagaimana\b", "Gimana");
+            s = Regex.Replace(s, @"\bBagaimana\b", "gimana");
             s = Regex.Replace(s, @"\bbagaimana\b", "gimana");
+            s = Regex.Replace(s, @"\bSiapakah\b", "siapa");
+            s = Regex.Replace(s, @"\bsiapakah\b", "siapa");
+            s = Regex.Replace(s, @"\bDimanakah\b", "di mana");
+            s = Regex.Replace(s, @"\bdimanakah\b", "di mana");
+            s = Regex.Replace(s, @"\bKapankah\b", "kapan");
+            s = Regex.Replace(s, @"\bkapankah\b", "kapan");
+            s = Regex.Replace(s, @"\bBisakah\s+Anda\b", "bisa tolong", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bBisakah\b", "bisa", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bDapatkah\b", "bisa", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bjika\b", "kalau", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bapabila\b", "kalau", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bagar\b", "biar", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsupaya\b", "biar", RegexOptions.IgnoreCase);
+
+            // 4. Everyday Game Dialogue Vocabulary & Particles
+            s = Regex.Replace(s, @"\b[Ss]aja\b", "aja");
+            s = Regex.Replace(s, @"\b[Hh]anya\b", "cuma");
+            s = Regex.Replace(s, @"\b[Ss]udah\b", "udah");
+            s = Regex.Replace(s, @"\b[Tt]elah\b", "udah");
+            s = Regex.Replace(s, @"\b[Tt]erlambat\b", "telat");
+            s = Regex.Replace(s, @"\b[Bb]enar-benar\b", "bener-bener");
+            s = Regex.Replace(s, @"\byang\s+benar\s+saja\b", "yang bener aja");
+            s = Regex.Replace(s, @"\b[Ss]aat\s+ini\b", "sekarang");
+            s = Regex.Replace(s, @"\b[Ss]ekarang\s+juga\b", "sekarang juga");
             s = Regex.Replace(s, @"\b[Bb]ergegaslah\b", "cepatlah");
             s = Regex.Replace(s, @"\b[Bb]ergegas\b", "cepat");
-            s = Regex.Replace(s, @"\bAkan tetapi\b", "Tapi");
-            s = Regex.Replace(s, @"\bakan tetapi\b", "tapi");
-            s = Regex.Replace(s, @"\bTetapi\b", "Tapi");
-            s = Regex.Replace(s, @"\btetapi\b", "tapi");
-            s = Regex.Replace(s, @"\bNamun\b", "Tapi");
-            s = Regex.Replace(s, @"\bOleh karena itu\b", "Jadi");
-            s = Regex.Replace(s, @"\boleh karena itu\b", "jadi");
-            s = Regex.Replace(s, @"\b[Tt]erima kasih banyak\b", "makasih banyak");
-            s = Regex.Replace(s, @"\b[Ss]aat ini\b", "sekarang");
-            s = Regex.Replace(s, @"\b[Dd]apatkah\b", "bisakah");
+            s = Regex.Replace(s, @"\b[Mm]ari\b", "ayo");
+            s = Regex.Replace(s, @"\bAkan\s+tetapi\b|\bakan\s+tetapi\b|\bTetapi\b|\btetapi\b|\bNamun\b|\bnamun\b", "tapi");
+            s = Regex.Replace(s, @"\bOleh\s+karena\s+itu\b|\boleh\s+karena\s+itu\b", "jadi");
+            s = Regex.Replace(s, @"\b[Tt]erima\s+kasih\s+banyak\b", "makasih banyak");
+            s = Regex.Replace(s, @"\b[Tt]erima\s+kasih\b", "makasih");
+            s = Regex.Replace(s, @"\bseperti\s+ini\b", "kayak gini");
+            s = Regex.Replace(s, @"\bseperti\s+itu\b", "kayak gitu");
+            s = Regex.Replace(s, @"\bseperti\s+apa\b", "kayak apa");
+            s = Regex.Replace(s, @"\bbagaimana\s+jika\b|\bbagaimana\s+kalau\b", "gimana kalau");
+
+            // Naturalize ongoing actions (sedang [verb] -> lagi [verb])
+            s = Regex.Replace(s, @"\b[Ss]edang\s+(makan|tidur|bicara|ngomong|nunggu|menunggu|mencari|nyari|pergi|jalan|berjalan|berlari|lari|bertarung|bertempur|istirahat|belajar|bekerja|berlatih|latihan|sembunyi|bersembunyi|bersiap|menyiapkan|menatap|melihat|memikirkan|berpikir)\b", "lagi $1");
+
+            // Naturalize intense adjectives (sangat [adj] -> [adj] banget)
+            s = Regex.Replace(s, @"\b(?:[Ss]angat|[Aa]mat)\s+(cepat|lambat|mudah|sulit|gampang|bagus|indah|kuat|lemah|banyak|sedikit|lelah|capek|lapar|haus|bahaya|dekat|jauh|keren|hebat|panjang|pendek|besar|kecil|panas|dingin)\b", "$1 banget");
+
+            // Additional conversational idioms & expressions
+            s = Regex.Replace(s, @"\blihat siapa yang (?:ada di sini|sedang tiba)\b", "lihat siapa yang datang", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\banggap saja rumah sendiri\b", "santai aja", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbukan masalah besar\b", "bukan masalah", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btiba-tiba saja\b", "tiba-tiba", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btinggalkan aku sendiri\b", "jangan ganggu aku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkamu sudah gila\b", "kamu gila ya", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bapakah kamu gila\b", "kamu gila ya", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkabari aku\b", "kabari aku ya", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkerja yang bagus\b", "kerja bagus", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkamu hebat sekali\b", "kamu hebat banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkeren sekali\b", "keren banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsangat lapar\b", "lapar banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsangat lelah\b", "capek banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsantai saja\b", "santai aja", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bjangan terburu-buru\b", "santai aja", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bpelan-pelan saja\b", "pelan-pelan aja", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bseperti biasa\b", "kayak biasa", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bseperti semula\b", "kayak semula", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btepat pada waktunya\b", "pas banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\baku berutang budi padamu\b", "aku berutang padamu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsaya berutang budi padamu\b", "aku berutang padamu", RegexOptions.IgnoreCase);
+
+            // Universal informal transformations (applies to ALL dialogue & sentences)
+            s = Regex.Replace(s, @"\b(?:terlihat|tampak)\s+seperti\b", "kelihatan kayak", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\brasanya\s+seperti\b", "rasanya kayak", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bhendak\b", "mau", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsebenarnya\b", "sebenernya", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbegitu\s+(cepat|lambat|mudah|sulit|kuat|lemah|banyak|besar|kecil|indah|hebat|keren)\b", "$1 banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bamat\s+sangat\b", "bener-bener", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bpada\s+akhirnya\b", "akhirnya", RegexOptions.IgnoreCase);
 
             // Fix capitalization after punctuation or start of string
             s = Regex.Replace(s, @"([\.\!\?]\s+)([a-z])", m => m.Groups[1].Value + m.Groups[2].Value.ToUpperInvariant());
@@ -722,15 +1029,21 @@ namespace TranslatorLive
             return bmp;
         }
 
-        private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded")
+        private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 2400)
         {
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.Proxy = null;
             req.KeepAlive = true;
-            req.Timeout = 4500;
-            req.ReadWriteTimeout = 4500;
-            req.UserAgent = "Mozilla/5.0";
+            req.Timeout = timeoutMs;
+            req.ReadWriteTimeout = timeoutMs;
+            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
             req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+            try
+            {
+                req.ServicePoint.UseNagleAlgorithm = false;
+                req.ServicePoint.Expect100Continue = false;
+            }
+            catch { }
 
             if (postBody != null)
             {
@@ -824,6 +1137,50 @@ namespace TranslatorLive
             return joined.Trim();
         }
 
+        public static string NormalizeCoreText(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return "";
+            string low = s.Trim().ToLowerInvariant();
+            // Replace all punctuation & bracket symbols with space so core words are compared
+            low = Regex.Replace(low, @"[.,!?;:""'’“”\-—_\[\]\(\)\{\}\<\>\\\/|*~`#@^=+]+", " ");
+            low = Regex.Replace(low, @"\s+", " ").Trim();
+            return low;
+        }
+
+        public static bool EndsWithTerminalPunctuation(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return false;
+            string t = s.TrimEnd();
+            if (t.Length == 0) return false;
+            char last = t[t.Length - 1];
+            return last == '.' || last == '!' || last == '?' || last == '"' || last == '”' ||
+                   last == '…' || last == ')' || last == ']' || last == '}' || last == ':' ||
+                   t.EndsWith("...") || t.EndsWith("..") || last == '。' || last == '！' || last == '？';
+        }
+
+        public static int LevenshteinDistance(string a, string b)
+        {
+            if (a == b) return 0;
+            if (string.IsNullOrEmpty(a)) return b == null ? 0 : b.Length;
+            if (string.IsNullOrEmpty(b)) return a.Length;
+
+            int[] prev = new int[b.Length + 1];
+            int[] curr = new int[b.Length + 1];
+            for (int j = 0; j <= b.Length; j++) prev[j] = j;
+
+            for (int i = 1; i <= a.Length; i++)
+            {
+                curr[0] = i;
+                for (int j = 1; j <= b.Length; j++)
+                {
+                    int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+                    curr[j] = Math.Min(Math.Min(prev[j] + 1, curr[j - 1] + 1), prev[j - 1] + cost);
+                }
+                int[] tmp = prev; prev = curr; curr = tmp;
+            }
+            return prev[b.Length];
+        }
+
         public static float ComputeSimilarity(string a, string b)
         {
             if (a == b) return 1f;
@@ -837,20 +1194,8 @@ namespace TranslatorLive
                 for (int i = 0; i < minL; i++) if (la[i] == lb[i]) same++;
                 return (float)same / maxLen;
             }
-            int[] prev = new int[lb.Length + 1];
-            int[] curr = new int[lb.Length + 1];
-            for (int j = 0; j <= lb.Length; j++) prev[j] = j;
-            for (int i = 1; i <= la.Length; i++)
-            {
-                curr[0] = i;
-                for (int j = 1; j <= lb.Length; j++)
-                {
-                    int cost = (la[i - 1] == lb[j - 1]) ? 0 : 1;
-                    curr[j] = Math.Min(Math.Min(prev[j] + 1, curr[j - 1] + 1), prev[j - 1] + cost);
-                }
-                int[] tmp = prev; prev = curr; curr = tmp;
-            }
-            return 1f - ((float)prev[lb.Length] / maxLen);
+            int dist = LevenshteinDistance(la, lb);
+            return 1f - ((float)dist / maxLen);
         }
 
         public string TranslateChoicesLineByLine(string multilineChoices, string srcLang, string tgtLang,
@@ -899,7 +1244,8 @@ namespace TranslatorLive
             error = "";
             if (string.IsNullOrWhiteSpace(text)) return "";
 
-            string cacheKey = preferredEngine + "|" + (naturalTone ? "N" : "L") + "|" + srcLang + "|" + tgtLang + "|" + (glossary ?? "") + "|" + text;
+            string coreKey = NormalizeCoreText(text);
+            string cacheKey = preferredEngine + "|" + (naturalTone ? "N" : "L") + "|" + srcLang + "|" + tgtLang + "|" + (glossary ?? "") + "|" + (string.IsNullOrEmpty(coreKey) ? text.Trim() : coreKey);
             lock (_cacheLock)
             {
                 string hit;
@@ -917,7 +1263,7 @@ namespace TranslatorLive
 
             if (preferredEngine == "gemini" && !string.IsNullOrWhiteSpace(geminiKey))
             {
-                result = CallGemini(text, tgtLang, geminiKey, naturalTone, glossary, out error);
+                result = CallGemini(prepped, tgtLang, geminiKey, naturalTone, glossary, out error);
                 if (!string.IsNullOrEmpty(result)) usedProvider = "Gemini AI";
             }
 
@@ -927,16 +1273,28 @@ namespace TranslatorLive
                 {
                     result = CallMyMemory(prepped, srcLang, tgtLang, out error);
                     if (!string.IsNullOrEmpty(result)) usedProvider = "MyMemory";
-                    else { result = CallGoogleGtx(prepped, srcLang, tgtLang, out error); if (!string.IsNullOrEmpty(result)) { usedProvider = "Google"; error = ""; } }
+                    else
+                    {
+                        result = CallGoogleGtx(prepped, srcLang, tgtLang, out error);
+                        if (!string.IsNullOrEmpty(result)) { usedProvider = "Google (Cadangan)"; error = ""; }
+                    }
                 }
                 else
                 {
                     result = CallGoogleGtx(prepped, srcLang, tgtLang, out error);
                     if (!string.IsNullOrEmpty(result)) usedProvider = "Google";
-                    else { result = CallMyMemory(prepped, srcLang, tgtLang, out error); if (!string.IsNullOrEmpty(result)) { usedProvider = "MyMemory"; error = ""; } }
+                    else
+                    {
+                        result = CallMyMemory(prepped, srcLang, tgtLang, out error);
+                        if (!string.IsNullOrEmpty(result)) { usedProvider = "MyMemory (Cadangan)"; error = ""; }
+                    }
                 }
-                result = RestoreGlossary(result, glossEntries);
+            }
+
+            if (!string.IsNullOrEmpty(result))
+            {
                 result = NaturalizeIndonesian(result, tgtLang, naturalTone);
+                result = RestoreGlossary(result, glossEntries);
             }
 
             if (!string.IsNullOrEmpty(result))
@@ -962,7 +1320,7 @@ namespace TranslatorLive
                 string escaped = prompt.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
                 string body = "{\"contents\":[{\"parts\":[{\"text\":\"" + escaped + "\"}]}]}";
                 string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + Uri.EscapeDataString(apiKey.Trim());
-                string json = HttpRequestFast(url, body, "application/json");
+                string json = HttpRequestFast(url, body, "application/json", 3800);
                 int idx = json.IndexOf("\"text\": \"", StringComparison.Ordinal);
                 if (idx < 0) idx = json.IndexOf("\"text\":\"", StringComparison.Ordinal);
                 if (idx < 0) return "";
@@ -982,7 +1340,7 @@ namespace TranslatorLive
                 string url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=" +
                              Uri.EscapeDataString(sl) + "&tl=" + Uri.EscapeDataString(tl) +
                              "&dt=t&q=" + Uri.EscapeDataString(text);
-                return ParseGoogleGtxJson(HttpRequestFast(url));
+                return ParseGoogleGtxJson(HttpRequestFast(url, null, "application/x-www-form-urlencoded", 2400));
             }
             catch (Exception ex) { error = "Google error: " + ex.Message; return ""; }
         }
@@ -996,10 +1354,22 @@ namespace TranslatorLive
                 string tl = string.IsNullOrEmpty(tgtLang) ? "id" : tgtLang;
                 string url = "https://api.mymemory.translated.net/get?q=" + Uri.EscapeDataString(text) +
                              "&langpair=" + Uri.EscapeDataString(sl + "|" + tl);
-                string json = HttpRequestFast(url);
+                string json = HttpRequestFast(url, null, "application/x-www-form-urlencoded", 1800);
+                if (string.IsNullOrEmpty(json)) return "";
+                if (json.Contains("\"quotaFinished\":true") || json.Contains("\"responseStatus\":429"))
+                {
+                    error = "MyMemory daily limit exceeded";
+                    return "";
+                }
                 int idx = json.IndexOf("\"translatedText\":\"", StringComparison.Ordinal);
                 if (idx < 0) return "";
-                return ReadJsonString(json, idx + 17);
+                string parsed = ReadJsonString(json, idx + 17);
+                if (parsed.IndexOf("MYMEMORY WARNING", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    error = "MyMemory quota exhausted";
+                    return "";
+                }
+                return parsed;
             }
             catch (Exception ex) { error = "MyMemory error: " + ex.Message; return ""; }
         }
