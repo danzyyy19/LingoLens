@@ -176,6 +176,19 @@ namespace TranslatorLive
                             return 1;
                         }
 
+                        // Test Saria's Song small-font OCR repair ("Whenever\" wapt%talk..." -> "Whenever you want to talk...") + possessive naturalization ("laguku")
+                        string sariaDirty = "Whenever\" wapt%talk to me, just play my song. You can call it Saria's Song. And here it goes...";
+                        string sariaClean = TranslationEngine.CleanGameOcrText(sariaDirty, "en");
+                        string sariaTr = eng.TranslateText(sariaClean, "en", "id", "google", "", true, out prov, out terr, "Saria");
+                        LogTest("[SARIA-OCR-CLEAN] " + sariaClean);
+                        LogTest("[SARIA-TRANS] " + sariaTr);
+                        if (!sariaClean.Contains("Whenever you want to talk to me") || sariaClean.Contains("wapt") || sariaClean.Contains("%") ||
+                            string.IsNullOrEmpty(sariaTr) || !sariaTr.ToLowerInvariant().Contains("laguku") || sariaTr.ToLowerInvariant().Contains("lagu aku"))
+                        {
+                            LogTest("[FAIL] Saria small-font repair or possessive naturalization failed: " + sariaClean + " -> " + sariaTr);
+                            return 1;
+                        }
+
                         // Direct verification of Indonesian everyday naturalization rules
                         string testStiff1 = TranslationEngine.NaturalizeIndonesian("Tangkap saya nanti. Saya punya ini.", "id", true);
                         string testStiff2 = TranslationEngine.NaturalizeIndonesian("Apakah Anda tidak bisa melakukannya? Jangan khawatir, tentu saja!", "id", true);

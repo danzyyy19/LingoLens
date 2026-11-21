@@ -39,7 +39,7 @@ namespace TranslatorLive
         private volatile bool _running;
         private volatile bool _pausedForEdit;
         private volatile bool _forceScan;
-        private volatile bool _fastPollNext;
+        private volatile int _fastPollMs;
 
         private readonly Dictionary<int, byte[]> _prevSigs = new Dictionary<int, byte[]>();
         private readonly Dictionary<int, string> _lastOcrByArea = new Dictionary<int, string>();
@@ -241,8 +241,8 @@ namespace TranslatorLive
                     ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, naturalTone, detectSpeaker, waitStable, mergeLines, enhanceOcr, autoHideSec, forced);
                 }
 
-                int waitTarget = _fastPollNext ? 25 : intervalMs;
-                _fastPollNext = false;
+                int waitTarget = _fastPollMs > 0 ? _fastPollMs : intervalMs;
+                _fastPollMs = 0;
                 int slept = 0;
                 while (slept < waitTarget && !_stop && _running && !_forceScan && !_pausedForEdit)
                 {
@@ -344,24 +344,42 @@ namespace TranslatorLive
                         return;
                     }
 
-                    // Fast Streaming Typewriter Debouncer (Zero delay on instant video subtitles; 25ms micro-poll only while actively typing):
+                    // Fast Multi-Sentence Typewriter Debouncer:
+                    // - On first frame of a brand-new dialogue box (when not yet complete or very short), wait 35ms to detect if a typewriter effect is actively streaming.
+                    // - While text is actively expanding (even across sentence periods like Sentence 1 "." -> Sentence 2), wait 35ms (or 90ms at sentence punctuation pauses) until typing stops!
                     if (!forced && !treatAsChoice)
                     {
                         bool isTerminal = EndsWithTerminalPunctuation(cleanText);
-                        if (!string.IsNullOrEmpty(pendingText))
+                        string coreClean = NormalizeCoreText(cleanText);
+                        string corePend = NormalizeCoreText(pendingText ?? "");
+
+                        string prevConfirmedOcr = "";
+                        _lastOcrByArea.TryGetValue(area.Id, out prevConfirmedOcr);
+                        string corePrevConfirmed = NormalizeCoreText(prevConfirmedOcr ?? "");
+
+                        bool isNewUnconfirmed = (coreClean != corePrevConfirmed);
+                        bool isExpanding = !string.IsNullOrEmpty(corePend) && coreClean.Length > corePend.Length &&
+                            (coreClean.StartsWith(corePend, StringComparison.OrdinalIgnoreCase) ||
+                             (corePend.Length >= 4 && ComputeSimilarity(coreClean.Substring(0, corePend.Length), corePend) >= 0.72f));
+
+                        if (isNewUnconfirmed)
                         {
-                            string coreClean = NormalizeCoreText(cleanText);
-                            string corePend = NormalizeCoreText(pendingText);
+                            // First sighting of a new incomplete or short text: do a 35ms check to see if it's typing out
+                            if (pendingCount == 0 && (!isTerminal || coreClean.Length < 42))
+                            {
+                                _pendingOcrByArea[area.Id] = cleanText;
+                                _pendingCountByArea[area.Id] = 1;
+                                _fastPollMs = 35;
+                                return;
+                            }
 
-                            bool isExpanding = coreClean.Length > corePend.Length &&
-                                (coreClean.StartsWith(corePend, StringComparison.OrdinalIgnoreCase) ||
-                                 (corePend.Length >= 4 && ComputeSimilarity(coreClean.Substring(0, corePend.Length), corePend) >= 0.75f));
-
-                            if (isExpanding && !isTerminal && pendingCount < 10)
+                            // Actively growing typewriter stream (including multi-sentence paragraphs where Sentence 1 ends with '.' while Sentence 2 is typing)
+                            if (isExpanding && pendingCount < 24)
                             {
                                 _pendingOcrByArea[area.Id] = cleanText;
                                 _pendingCountByArea[area.Id] = pendingCount + 1;
-                                _fastPollNext = true; // Re-poll in 25ms so there is no lag when typing finishes!
+                                // RPG typewriters pause ~70-90ms at periods/commas before typing the next sentence
+                                _fastPollMs = (isTerminal || cleanText.EndsWith(",")) ? 85 : 35;
                                 return;
                             }
                         }
@@ -391,36 +409,44 @@ namespace TranslatorLive
                         return;
                     }
 
-                    // 2. If previous subtitle was already complete & high-quality, lock it if new scan is just a minor variation or substring
-                    bool prevWasComplete = EndsWithTerminalPunctuation(prevOcr) && prevOcrScore >= 82;
-                    if (prevWasComplete && corePrev.Length >= 12 && (coreNew.Contains(corePrev) || corePrev.Contains(coreNew)) &&
-                        Math.Abs(coreNew.Length - corePrev.Length) <= 6)
+                    // 1b. Multi-sentence paragraph expansion: if new text appends a new clause/sentence (>= 4 chars longer and starts with previous text), ALWAYS translate immediately!
+                    bool isParagraphExpansion = coreNew.Length >= corePrev.Length + 4 &&
+                        (coreNew.StartsWith(corePrev, StringComparison.OrdinalIgnoreCase) ||
+                         (corePrev.Length >= 8 && ComputeSimilarity(coreNew.Substring(0, corePrev.Length), corePrev) >= 0.80f));
+
+                    if (!isParagraphExpansion)
                     {
-                        _lastActiveUtc[area.Id] = DateTime.UtcNow;
-                        CheckIdleTimeout(area.Id, autoHideSec);
-                        return;
-                    }
-
-                    // 3. High semantic similarity check
-                    int dist = LevenshteinDistance(coreNew, corePrev);
-                    int maxLen = Math.Max(coreNew.Length, corePrev.Length);
-                    bool isSameSentence = false;
-
-                    if (maxLen <= 25 && dist <= 2) isSameSentence = true;
-                    else if (maxLen <= 60 && dist <= 3) isSameSentence = true;
-                    else if (ComputeSimilarity(coreNew, corePrev) >= 0.80f) isSameSentence = true;
-
-                    if (isSameSentence)
-                    {
-                        // Only upgrade if previous scan was noisy (< 78) and new scan is much cleaner (>= 90),
-                        // OR if previous scan was an incomplete sentence that just finished typing its ending
-                        bool prevIncomplete = !EndsWithTerminalPunctuation(prevOcr) && EndsWithTerminalPunctuation(cleanText) && coreNew.Length > corePrev.Length + 3;
-                        bool fixedSevereNoise = (prevOcrScore < 78 && newOcrScore >= 90);
-                        if (!prevIncomplete && !fixedSevereNoise)
+                        // 2. If previous subtitle was already complete & high-quality, lock it if new scan is just a minor variation or shorter substring
+                        bool prevWasComplete = EndsWithTerminalPunctuation(prevOcr) && prevOcrScore >= 82;
+                        if (prevWasComplete && corePrev.Length >= 12 && (coreNew.Contains(corePrev) || corePrev.Contains(coreNew)) &&
+                            coreNew.Length <= corePrev.Length + 3)
                         {
                             _lastActiveUtc[area.Id] = DateTime.UtcNow;
                             CheckIdleTimeout(area.Id, autoHideSec);
-                            return; // Lock displayed translation rock-solid while video moves!
+                            return;
+                        }
+
+                        // 3. High semantic similarity check
+                        int dist = LevenshteinDistance(coreNew, corePrev);
+                        int maxLen = Math.Max(coreNew.Length, corePrev.Length);
+                        bool isSameSentence = false;
+
+                        if (maxLen <= 25 && dist <= 2) isSameSentence = true;
+                        else if (maxLen <= 60 && dist <= 3) isSameSentence = true;
+                        else if (ComputeSimilarity(coreNew, corePrev) >= 0.80f) isSameSentence = true;
+
+                        if (isSameSentence)
+                        {
+                            // Only upgrade if previous scan was noisy (< 82) and new scan is cleaner,
+                            // OR if previous scan was an incomplete sentence that just finished typing its ending
+                            bool prevIncomplete = !EndsWithTerminalPunctuation(prevOcr) && EndsWithTerminalPunctuation(cleanText) && coreNew.Length > corePrev.Length + 2;
+                            bool fixedSevereNoise = (prevOcrScore < 82 && newOcrScore >= prevOcrScore + 8);
+                            if (!prevIncomplete && !fixedSevereNoise)
+                            {
+                                _lastActiveUtc[area.Id] = DateTime.UtcNow;
+                                CheckIdleTimeout(area.Id, autoHideSec);
+                                return; // Lock displayed translation rock-solid while video moves!
+                            }
                         }
                     }
                 }
@@ -683,6 +709,9 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\b[Pp]ull\s+yourself\s+together\b", "calm down");
             s = Regex.Replace(s, @"\bI\s+owe\s+you\s+one\b", "I am grateful to you");
             s = Regex.Replace(s, @"\b[Yy]ou\s+can\s+say\s+that\s+again\b", "I completely agree");
+            s = Regex.Replace(s, @"\b[Aa]nd\s+here\s+it\s+goes\b", "And it is like this");
+            s = Regex.Replace(s, @"\b[Hh]ere\s+it\s+goes\b", "Here we go");
+            s = Regex.Replace(s, @"\b[Hh]ere\s+we\s+go\b", "let us begin");
 
             // Gaming entities & sacred titles (Zelda, Elden Ring, RPGs)
             s = Regex.Replace(s, @"\b[Tt]he\s+Great\s+Deku\s+Tree\b", "The Great Deku Tree");
@@ -818,7 +847,17 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\b[Tt]idak,\b", "Gak,");
             s = Regex.Replace(s, @"\btidak\b", "gak");
 
-            // 3. Pronouns & Conversational Polish (eliminating robotic formal speech)
+            // 3. Pronouns, Possessive Suffixes (-ku / -mu) & Conversational Polish (eliminating stiff "lagu saya" / "lagu aku" / "dengan aku")
+            s = Regex.Replace(s, @"\b(lagu|nama|teman|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|masa\s+lalu|masa\s+depan|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)\s+(?:saya|aku)\b", "$1ku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(lagu|nama|teman|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)\s+Anda\b", "$1mu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdengan\s+(?:saya|aku)\b", "denganku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkepada\s+(?:saya|aku)\b|\bpada\s+(?:saya|aku)\b", "padaku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buntuk\s+(?:saya|aku)\b", "untukku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdengan\s+Anda\b", "denganmu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkepada\s+Anda\b|\bpada\s+Anda\b", "padamu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buntuk\s+Anda\b", "untukmu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Dd]an\s+itu\s+berjalan\s+(?:seperti|kayak)\s+(?:ini|gini)", "Dan seperti ini");
+            s = Regex.Replace(s, @"\b[Dd]an\s+begini\.\.\.", "Dan seperti ini...");
             s = Regex.Replace(s, @"\bAnda\b", "kamu");
             s = Regex.Replace(s, @"\banda\b", "kamu");
             s = Regex.Replace(s, @"\bSaya\b", "aku");
@@ -1075,80 +1114,161 @@ namespace TranslatorLive
                 return RecognizeOnlineOcrSpace(sourceBmp, srcLang, out error);
             }
 
-            // Pass 1 (Ultra-Fast Native / Fast-Upscale Pass — ~22ms on 1437x345!):
-            // Only upscale on Pass 1 if the capture box itself is tiny (< 115px tall or < 420px wide).
-            Bitmap pass1Bmp = (sourceBmp.Height < 115 || sourceBmp.Width < 420)
-                ? UpscaleNaturalForOcr(sourceBmp)
-                : sourceBmp;
             try
             {
+                int w = sourceBmp.Width, h = sourceBmp.Height;
+                BitmapData bd = sourceBmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                int srcStride = bd.Stride;
+                byte[] srcBuf = new byte[Math.Abs(srcStride) * h];
+                try { Marshal.Copy(bd.Scan0, srcBuf, 0, srcBuf.Length); }
+                finally { sourceBmp.UnlockBits(bd); }
+
+                // Calculate optimal Super-Resolution scale factor for Pass 1 (~8-11ms in-memory fixed-point bilinear upscale!):
+                // Ensures small 15-18px game fonts inside large 1437x345 boxes are always crisp ~25-32px tall for WinRT OCR.
+                float scale = 1.0f;
+                if (h < 150) scale = 2.0f;
+                else if (h < 260 && w * 1.65f <= 2500) scale = 1.65f;
+                else if (h < 390 && w * 1.45f <= 2400) scale = 1.45f;
+                else if (h < 520 && w * 1.30f <= 2400) scale = 1.30f;
+
+                int nw = (scale > 1.01f) ? (int)(w * scale) : w;
+                int nh = (scale > 1.01f) ? (int)(h * scale) : h;
+
+                // Pass 1: Fast In-Memory Bilinear Super-Resolution (Natural RGB)
+                byte[] pass1Buf = (scale > 1.01f)
+                    ? ScaleAndProcessRawBgra(srcBuf, w, h, srcStride, nw, nh, false)
+                    : ((srcStride == w * 4) ? srcBuf : ScaleAndProcessRawBgra(srcBuf, w, h, srcStride, w, h, false));
+
                 bool choice1 = false;
-                string text1 = RunWinRtOcrSinglePass(eng, pass1Bmp, srcLang, out choice1);
-                if (!enhanceOcr || string.IsNullOrWhiteSpace(text1))
+                string text1 = RunWinRtOcrFromBuffer(eng, pass1Buf, nw, nh, srcLang, out choice1);
+                if (!enhanceOcr)
                 {
                     detectedChoiceLayout = choice1;
                     return text1;
                 }
 
                 int score1 = ScoreOcrQuality(text1, srcLang);
-                // If Pass 1 already produced clean, high-confidence text (>= 88), return immediately (~22ms total!)
-                if (score1 >= 88)
+                // If Pass 1 already produced clean, high-confidence text (>= 90), return immediately (~45ms total!)
+                if (score1 >= 90 && !string.IsNullOrWhiteSpace(text1))
                 {
                     detectedChoiceLayout = choice1;
                     return text1;
                 }
 
-                // Pass 2 (Super-Resolution + Smooth Achromatic Glare Suppression Fallback for tiny fonts or blinding glare):
-                Bitmap scaledForPass2 = (pass1Bmp == sourceBmp) ? UpscaleNaturalForOcr(sourceBmp) : pass1Bmp;
-                try
-                {
-                    using (Bitmap achromBmp = ToSmoothAchromaticGrayscale(scaledForPass2))
-                    {
-                        bool choice2 = false;
-                        string text2 = RunWinRtOcrSinglePass(eng, achromBmp, srcLang, out choice2);
-                        int score2 = ScoreOcrQuality(text2, srcLang);
+                // Pass 2: Smooth Achromatic Glare Suppression on the already-upscaled buffer (~3ms in-memory transform + ~18ms OCR!)
+                byte[] pass2Buf = ApplySmoothAchromaticInPlaceOrCopy(pass1Buf, nw, nh);
+                bool choice2 = false;
+                string text2 = RunWinRtOcrFromBuffer(eng, pass2Buf, nw, nh, srcLang, out choice2);
+                int score2 = ScoreOcrQuality(text2, srcLang);
 
-                        if (score2 > score1 && !string.IsNullOrWhiteSpace(text2))
-                        {
-                            detectedChoiceLayout = choice2;
-                            return text2;
-                        }
-                        detectedChoiceLayout = choice1;
-                        return text1;
-                    }
-                }
-                finally
+                if (score2 > score1 && !string.IsNullOrWhiteSpace(text2))
                 {
-                    if (scaledForPass2 != null && scaledForPass2 != sourceBmp && scaledForPass2 != pass1Bmp)
-                        scaledForPass2.Dispose();
+                    detectedChoiceLayout = choice2;
+                    return text2;
                 }
+                detectedChoiceLayout = choice1;
+                return text1;
             }
             catch (Exception ex)
             {
                 error = "OCR error: " + ex.Message;
                 return "";
             }
-            finally
-            {
-                if (pass1Bmp != null && pass1Bmp != sourceBmp)
-                    pass1Bmp.Dispose();
-            }
         }
 
-        private static string RunWinRtOcrSinglePass(OcrEngine eng, Bitmap bmp, string srcLang, out bool detectedChoiceLayout)
+        private static byte[] ScaleAndProcessRawBgra(byte[] src, int sw, int sh, int srcStride, int dw, int dh, bool achromatic)
+        {
+            byte[] dst = new byte[dw * dh * 4];
+            int xRatio = ((sw - 1) << 16) / Math.Max(1, dw);
+            int yRatio = ((sh - 1) << 16) / Math.Max(1, dh);
+
+            for (int y = 0; y < dh; y++)
+            {
+                int syFixed = y * yRatio;
+                int sy = syFixed >> 16;
+                int fy = (syFixed >> 8) & 0xFF;
+                int ify = 256 - fy;
+                int sy2 = (sy + 1 < sh) ? (sy + 1) : sy;
+                int row0 = sy * srcStride;
+                int row1 = sy2 * srcStride;
+                int dstRow = y * dw * 4;
+
+                for (int x = 0; x < dw; x++)
+                {
+                    int sxFixed = x * xRatio;
+                    int sx = sxFixed >> 16;
+                    int fx = (sxFixed >> 8) & 0xFF;
+                    int ifx = 256 - fx;
+                    int sx2 = (sx + 1 < sw) ? (sx + 1) : sx;
+
+                    int off00 = row0 + (sx << 2);
+                    int off01 = row0 + (sx2 << 2);
+                    int off10 = row1 + (sx << 2);
+                    int off11 = row1 + (sx2 << 2);
+
+                    int w00 = ifx * ify;
+                    int w01 = fx * ify;
+                    int w10 = ifx * fy;
+                    int w11 = fx * fy;
+
+                    byte b = (byte)((src[off00] * w00 + src[off01] * w01 + src[off10] * w10 + src[off11] * w11) >> 16);
+                    byte g = (byte)((src[off00 + 1] * w00 + src[off01 + 1] * w01 + src[off10 + 1] * w10 + src[off11 + 1] * w11) >> 16);
+                    byte r = (byte)((src[off00 + 2] * w00 + src[off01 + 2] * w01 + src[off10 + 2] * w10 + src[off11 + 2] * w11) >> 16);
+
+                    int dOff = dstRow + (x << 2);
+                    if (achromatic)
+                    {
+                        byte minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                        byte maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                        int sat = maxC - minC;
+                        int val = minC - ((sat * 3) >> 2);
+                        byte v = (byte)(val > 0 ? val : 0);
+                        dst[dOff] = v;
+                        dst[dOff + 1] = v;
+                        dst[dOff + 2] = v;
+                        dst[dOff + 3] = 255;
+                    }
+                    else
+                    {
+                        dst[dOff] = b;
+                        dst[dOff + 1] = g;
+                        dst[dOff + 2] = r;
+                        dst[dOff + 3] = 255;
+                    }
+                }
+            }
+            return dst;
+        }
+
+        private static byte[] ApplySmoothAchromaticInPlaceOrCopy(byte[] srcBgra, int w, int h)
+        {
+            byte[] dst = new byte[srcBgra.Length];
+            int len = w * h * 4;
+            for (int off = 0; off < len; off += 4)
+            {
+                byte b = srcBgra[off], g = srcBgra[off + 1], r = srcBgra[off + 2];
+                byte minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                byte maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                int sat = maxC - minC;
+                int val = minC - ((sat * 3) >> 2);
+                byte v = (byte)(val > 0 ? val : 0);
+                dst[off] = v;
+                dst[off + 1] = v;
+                dst[off + 2] = v;
+                dst[off + 3] = 255;
+            }
+            return dst;
+        }
+
+        private static string RunWinRtOcrFromBuffer(OcrEngine eng, byte[] bgraBuf, int width, int height, string srcLang, out bool detectedChoiceLayout)
         {
             detectedChoiceLayout = false;
-            if (bmp == null) return "";
-
-            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-            byte[] buf = new byte[bd.Stride * bmp.Height];
-            try { Marshal.Copy(bd.Scan0, buf, 0, buf.Length); }
-            finally { bmp.UnlockBits(bd); }
+            if (bgraBuf == null || width <= 0 || height <= 0) return "";
 
             bool isCjk = (srcLang == "ja" || srcLang == "zh-CN" || srcLang == "zh-TW" || srcLang == "ko");
-            var ibuf = CryptographicBuffer.CreateFromByteArray(buf);
+            var ibuf = CryptographicBuffer.CreateFromByteArray(bgraBuf);
             using (SoftwareBitmap sb = SoftwareBitmap.CreateCopyFromBuffer(
-                ibuf, BitmapPixelFormat.Bgra8, bmp.Width, bmp.Height, BitmapAlphaMode.Premultiplied))
+                ibuf, BitmapPixelFormat.Bgra8, width, height, BitmapAlphaMode.Premultiplied))
             {
                 OcrResult res = AwaitWinRt(eng.RecognizeAsync(sb));
                 if (res == null || res.Lines == null || res.Lines.Count == 0) return "";
@@ -1214,70 +1334,6 @@ namespace TranslatorLive
             return false;
         }
 
-        private static Bitmap UpscaleNaturalForOcr(Bitmap bmp)
-        {
-            if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0) return bmp;
-
-            float scale = 1.0f;
-            if (bmp.Height < 140) scale = 2.0f;
-            else if (bmp.Height < 260 && bmp.Width * 1.6f <= 2600) scale = 1.6f;
-            else if (bmp.Height < 420 && bmp.Width * 1.35f <= 2400) scale = 1.35f;
-
-            if (scale <= 1.01f) return bmp;
-
-            int nw = (int)(bmp.Width * scale);
-            int nh = (int)(bmp.Height * scale);
-            Bitmap up = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
-            using (Graphics g = Graphics.FromImage(up))
-            {
-                g.InterpolationMode = InterpolationMode.Bilinear;
-                g.PixelOffsetMode = PixelOffsetMode.HighSpeed;
-                g.DrawImage(bmp, 0, 0, nw, nh);
-            }
-            return up;
-        }
-
-        private static Bitmap ToSmoothAchromaticGrayscale(Bitmap scaledBmp)
-        {
-            int w = scaledBmp.Width, h = scaledBmp.Height;
-            Bitmap target = new Bitmap(scaledBmp);
-            BitmapData bd = target.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
-            try
-            {
-                int stride = bd.Stride;
-                int totalBytes = Math.Abs(stride) * h;
-                byte[] raw = new byte[totalBytes];
-                Marshal.Copy(bd.Scan0, raw, 0, totalBytes);
-
-                for (int y = 0; y < h; y++)
-                {
-                    int row = y * stride;
-                    for (int x = 0; x < w; x++)
-                    {
-                        int off = row + x * 4;
-                        byte b = raw[off], g = raw[off + 1], r = raw[off + 2];
-                        byte minC = Math.Min(r, Math.Min(g, b));
-                        byte maxC = Math.Max(r, Math.Max(g, b));
-                        int sat = maxC - minC;
-
-                        // Smooth saturation-suppressed grayscale: darkens bright yellow/orange/colored glare
-                        // while keeping white text & anti-aliased thin strokes 100% smooth without 3D edge artifacts!
-                        byte v = (byte)Math.Max(0, minC - ((sat * 3) >> 2));
-                        raw[off] = v;
-                        raw[off + 1] = v;
-                        raw[off + 2] = v;
-                    }
-                }
-
-                Marshal.Copy(raw, 0, bd.Scan0, totalBytes);
-            }
-            finally
-            {
-                target.UnlockBits(bd);
-            }
-            return target;
-        }
-
         public static int ScoreOcrQuality(string raw, string srcLang)
         {
             if (string.IsNullOrWhiteSpace(raw)) return 0;
@@ -1287,18 +1343,22 @@ namespace TranslatorLive
             bool isCjk = (srcLang == "ja" || srcLang == "zh-CN" || srcLang == "zh-TW" || srcLang == "ko");
             int score = 100;
 
+            int quoteCount = 0;
             foreach (char c in s)
             {
-                if (c == '<' || c == '>' || c == '*' || c == '&' || c == '~' || c == '^' || c == '|' || c == '_' || c == '#' || c == '@')
-                    score -= 16;
+                if (c == '"') quoteCount++;
+                if (c == '<' || c == '>' || c == '*' || c == '&' || c == '~' || c == '^' || c == '|' || c == '_' || c == '#' || c == '@' ||
+                    c == '%' || c == '$' || c == '+' || c == '=' || c == '\\' || c == '/')
+                    score -= 18;
                 else if (!isCjk && c > 127 && c != '’' && c != '“' && c != '”' && c != '…' && c != '—' && c != '•')
                     score -= 14;
             }
+            if ((quoteCount & 1) == 1) score -= 16; // Penalize unmatched stray double-quote artifacts (e.g. Whenever" wapt%talk)
 
             if (!isCjk)
             {
-                // Penalize quote/bracket noise clusters inside words like 'l'herefore or t'(')
-                score -= Regex.Matches(s, @"[A-Za-z]['""\(\)\[\]]+[A-Za-z\(\)\[\]]").Count * 20;
+                // Penalize quote/bracket/symbol noise clusters inside words like 'l'herefore, wapt%talk, or t'(')
+                score -= Regex.Matches(s, @"[A-Za-z][""\(\)\[\]%$+=\\\/]+[A-Za-z\(\)\[\]]").Count * 22;
                 score -= Regex.Matches(s, @"['""]{2,}|\(\)|\[\]|[:;]{2,}").Count * 18;
 
                 string[] words = Regex.Split(s, @"\s+");
@@ -1425,7 +1485,23 @@ namespace TranslatorLive
                 s = Regex.Replace(s, @"\b0([A-Z][a-z]+)\b", "O$1");
                 s = Regex.Replace(s, @"(?<=[a-zA-Z])0+", delegate(Match m) { return new string('o', m.Length); });
 
-                // 4g. Common Font Ligatures: vv -> w, rn -> m
+                // 4g. Common Font Ligatures & Small-Font Misreads: vv -> w, rn -> m, % -> to, " -> you
+                s = Regex.Replace(s, @"\b([Ww]henever|[Ii]f|[Ww]hen|[Ww]herever|[Ww]hatever)\s*[""“”']+\s*(?=(?:wapt|wanr|vvant|waht|want|need|like|can|could|are|were|have|had|see|go|come|get|find|hear|feel|think|know|play|talk|call|speak|ask|tell|try|use|make|take|give|wish|choose|decide)\b)", "$1 you ");
+                s = Regex.Replace(s, @"\b(?:wapt|wanr|vvant|waht)\b", "want");
+                s = Regex.Replace(s, @"\b(?:Wapt|Wanr|VVant|Waht)\b", "Want");
+                // In small fonts, "to" (t + o) is frequently misread as "%" (o/o) between words (e.g. "wapt%talk" -> "want to talk")
+                s = Regex.Replace(s, @"(?<=\b(?:want|wants|wanted|going|try|trying|tried|need|needs|needed|have|has|had|used|ready|able|unable|time|way|how|what|where|who|nothing|something|anything|someone|anyone|place|like|likes|liked|love|loves|loved|start|started|begin|began|continue|continued|decide|decided|promise|promised|refuse|refused|forget|forgot|remember|remembered|learn|learned|teach|taught|help|helped|come|came|go|went|listen|talk|speak|say|tell|ask|call|play|move|return|get|got|make|made))\s*%\s*(?=[A-Za-z])", " to ", RegexOptions.IgnoreCase);
+                s = Regex.Replace(s, @"(?<=[A-Za-z])\s*%\s*(?=(?:talk|speak|say|tell|ask|see|look|hear|listen|go|come|get|make|take|give|find|know|think|feel|play|call|use|try|help|save|protect|fight|defeat|open|close|enter|leave|return|stay|live|die|be|do|have|meet|catch|follow|run|walk|stop|start|begin|finish|end|win|lose|buy|sell|pay|eat|drink|sleep|wake|read|write|learn|understand|believe|remember|forget|me|you|him|her|us|them|it|this|that|here|there|the|a|an|my|your|his|our|their)\b)", " to ", RegexOptions.IgnoreCase);
+                s = Regex.Replace(s, @"(?<=[A-Za-z])%(?=[A-Za-z])", " to ");
+
+                // Strip unmatched stray single double-quote '"' attached to a word in the middle of a sentence
+                int qCnt = 0;
+                foreach (char qc in s) if (qc == '"') qCnt++;
+                if ((qCnt & 1) == 1)
+                {
+                    s = Regex.Replace(s, @"(?<=[A-Za-z])""(?=\s+[a-z])", "");
+                }
+
                 s = Regex.Replace(s, @"\bvv([a-zA-Z]+)\b", "w$1");
                 s = Regex.Replace(s, @"\bVV([a-zA-Z]+)\b", "W$1");
                 s = Regex.Replace(s, @"\brn(ust|ake|ade|any|ore|ost|uch|y|e|ean|eant|ight|ind|agic|onster|aster|other|ove|oment|ountain|ission|ay|an|en)\b", "m$1");
