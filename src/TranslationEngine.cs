@@ -6,6 +6,7 @@ using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -41,6 +42,7 @@ namespace TranslatorLive
 
         private readonly Dictionary<int, byte[]> _prevSigs = new Dictionary<int, byte[]>();
         private readonly Dictionary<int, string> _lastOcrByArea = new Dictionary<int, string>();
+        private readonly Dictionary<int, int> _lastOcrScoreByArea = new Dictionary<int, int>();
         private readonly Dictionary<int, string> _lastTransByArea = new Dictionary<int, string>();
         private readonly Dictionary<int, DateTime> _lastActiveUtc = new Dictionary<int, DateTime>();
         private readonly Dictionary<int, bool> _idleHidden = new Dictionary<int, bool>();
@@ -71,13 +73,13 @@ namespace TranslatorLive
             }
             catch { }
 
-            // Pre-warm HTTP connection to Google Cloud in background (eliminates cold-start TLS lag)
+            // Pre-warm IPv4 HTTP connections to Google Translate endpoints in background (eliminates cold-start TLS lag)
             ThreadPool.QueueUserWorkItem(delegate
             {
                 try
                 {
-                    string warmUrl = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1";
-                    HttpRequestFast(warmUrl, null, "application/x-www-form-urlencoded", 1800);
+                    HttpRequestFast("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1200);
+                    HttpRequestFast("https://translate.google.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1200);
                 }
                 catch { }
             });
@@ -115,6 +117,7 @@ namespace TranslatorLive
             {
                 _prevSigs.Remove(areaId);
                 _lastOcrByArea.Remove(areaId);
+                _lastOcrScoreByArea.Remove(areaId);
                 _lastTransByArea.Remove(areaId);
                 _lastActiveUtc.Remove(areaId);
                 _idleHidden.Remove(areaId);
@@ -129,6 +132,7 @@ namespace TranslatorLive
             {
                 _prevSigs.Clear();
                 _lastOcrByArea.Clear();
+                _lastOcrScoreByArea.Clear();
                 _lastTransByArea.Clear();
                 _lastActiveUtc.Clear();
                 _idleHidden.Clear();
@@ -263,30 +267,10 @@ namespace TranslatorLive
                 if (!forced && hasPrev)
                 {
                     float diff = ComputeDiffPercent(sig, prevSig);
-                    if (diff < 2.0f)
+                    if (diff < 1.8f)
                     {
                         CheckIdleTimeout(area.Id, autoHideSec);
                         return;
-                    }
-                }
-
-                if (waitStable && !forced)
-                {
-                    Thread.Sleep(90);
-                    if (_stop || !_running || _pausedForEdit) return;
-                    Bitmap second = CaptureRect(area.Ocr);
-                    if (second != null)
-                    {
-                        byte[] sig2 = ComputeSignature(second);
-                        if (ComputeDiffPercent(sig, sig2) > 4.5f)
-                        {
-                            _prevSigs[area.Id] = sig2;
-                            second.Dispose();
-                            return;
-                        }
-                        frame.Dispose();
-                        frame = second;
-                        sig = sig2;
                     }
                 }
 
@@ -307,12 +291,13 @@ namespace TranslatorLive
                     ? NormalizeChoices(rawText)
                     : NormalizeText(rawText, srcLang, mergeLines);
 
-                if (string.IsNullOrEmpty(cleanText))
+                if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
                 {
                     string oldT;
                     if (_lastTransByArea.TryGetValue(area.Id, out oldT) && !string.IsNullOrEmpty(oldT))
                     {
                         _lastOcrByArea[area.Id] = "";
+                        _lastOcrScoreByArea[area.Id] = 0;
                         _lastTransByArea[area.Id] = "";
                         _pendingOcrByArea[area.Id] = "";
                         _pendingCountByArea[area.Id] = 0;
@@ -322,12 +307,15 @@ namespace TranslatorLive
                     return;
                 }
 
+                int newOcrScore = ScoreOcrQuality(rawText, srcLang);
                 string prevOcr, prevTrans;
+                int prevOcrScore = 0;
                 _lastOcrByArea.TryGetValue(area.Id, out prevOcr);
+                _lastOcrScoreByArea.TryGetValue(area.Id, out prevOcrScore);
                 _lastTransByArea.TryGetValue(area.Id, out prevTrans);
 
-                // Anti-Flicker & Semantic Similarity Check:
-                // Prevents minor punctuation/noise jitter from re-triggering translation and flip-flopping meanings!
+                // Anti-Flicker & Monotonic Quality Ratchet:
+                // Locks steady/fading-out subtitles against flicker, but immediately upgrades when a fading-in video subtitle becomes cleaner/longer!
                 if (!forced && !string.IsNullOrEmpty(prevOcr) && !string.IsNullOrEmpty(prevTrans))
                 {
                     string coreNew = NormalizeCoreText(cleanText);
@@ -341,26 +329,30 @@ namespace TranslatorLive
                         return; // Identical core words: KEEP DISPLAYED RESULT, DO NOT RE-TRANSLATE
                     }
 
-                    // 2. High semantic similarity / 1-2 char OCR noise check
+                    // 2. High semantic similarity check with Quality Ratchet
                     int dist = LevenshteinDistance(coreNew, corePrev);
                     int maxLen = Math.Max(coreNew.Length, corePrev.Length);
                     bool isSameSentence = false;
 
                     if (maxLen <= 25 && dist <= 1) isSameSentence = true;
                     else if (maxLen <= 60 && dist <= 2) isSameSentence = true;
-                    else if (ComputeSimilarity(coreNew, corePrev) >= 0.86f) isSameSentence = true;
+                    else if (ComputeSimilarity(coreNew, corePrev) >= 0.84f) isSameSentence = true;
 
                     if (isSameSentence)
                     {
-                        _lastActiveUtc[area.Id] = DateTime.UtcNow;
-                        CheckIdleTimeout(area.Id, autoHideSec);
-                        return; // Same sentence: DO NOT FLICKER
+                        // Allow upgrade if the new scan is significantly cleaner (e.g. finished fade-in or glare cleared)
+                        bool qualityUpgraded = (newOcrScore >= prevOcrScore + 6) ||
+                                               (coreNew.Length >= corePrev.Length + 6 && newOcrScore >= prevOcrScore);
+                        if (!qualityUpgraded)
+                        {
+                            _lastActiveUtc[area.Id] = DateTime.UtcNow;
+                            CheckIdleTimeout(area.Id, autoHideSec);
+                            return; // Same sentence & not cleaner: lock existing clean translation!
+                        }
                     }
                 }
 
-                // Typewriter / Sequential Subtitle Typing Debouncing:
-                // If text is expanding letter-by-letter in a game and hasn't ended in terminal punctuation,
-                // wait 1 frame for the typewriter animation to settle so we don't display 5 changing partial translations!
+                // Typewriter / Sequential Subtitle Typing Debouncing (Video-safe: max 1 frame wait only when actively typing):
                 if (!forced && !treatAsChoice)
                 {
                     bool isTerminal = EndsWithTerminalPunctuation(cleanText);
@@ -369,13 +361,14 @@ namespace TranslatorLive
                     int pendingCount;
                     _pendingCountByArea.TryGetValue(area.Id, out pendingCount);
 
+                    int maxWaitTicks = waitStable ? 2 : 1;
                     if (!isTerminal && !string.IsNullOrEmpty(pendingText) && cleanText.Length > pendingText.Length && cleanText.StartsWith(pendingText, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (pendingCount < 2) // wait up to 2 ticks (~200ms) for typing to complete
+                        if (pendingCount < maxWaitTicks)
                         {
                             _pendingOcrByArea[area.Id] = cleanText;
                             _pendingCountByArea[area.Id] = pendingCount + 1;
-                            return; // wait for sentence to complete typing
+                            return;
                         }
                     }
                     _pendingOcrByArea[area.Id] = cleanText;
@@ -405,6 +398,7 @@ namespace TranslatorLive
                 }
 
                 _lastOcrByArea[area.Id] = cleanText;
+                _lastOcrScoreByArea[area.Id] = newOcrScore;
                 _lastTransByArea[area.Id] = translated;
                 _lastActiveUtc[area.Id] = DateTime.UtcNow;
                 _idleHidden[area.Id] = false;
@@ -1012,169 +1006,234 @@ namespace TranslatorLive
                 return RecognizeOnlineOcrSpace(sourceBmp, srcLang, out error);
             }
 
-            Bitmap prepared = PrepareForOcr(sourceBmp, enhanceOcr);
+            OcrEngine eng = GetWinRtEngine(srcLang);
+            if (eng == null)
+            {
+                usedOnline = true;
+                return RecognizeOnlineOcrSpace(sourceBmp, srcLang, out error);
+            }
+
+            // Pass 1: Natural High-Resolution Bicubic Upscaling (preserves full RGB channels, anti-aliasing, and white floating subtitles over bright cutscenes)
+            Bitmap scaledBmp = UpscaleNaturalForOcr(sourceBmp);
             try
             {
-                OcrEngine eng = GetWinRtEngine(srcLang);
-                if (eng == null) { usedOnline = true; return RecognizeOnlineOcrSpace(sourceBmp, srcLang, out error); }
-
-                BitmapData bd = prepared.LockBits(new Rectangle(0, 0, prepared.Width, prepared.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                byte[] buf = new byte[bd.Stride * prepared.Height];
-                try { Marshal.Copy(bd.Scan0, buf, 0, buf.Length); }
-                finally { prepared.UnlockBits(bd); }
-
-                var ibuf = CryptographicBuffer.CreateFromByteArray(buf);
-                using (SoftwareBitmap sb = SoftwareBitmap.CreateCopyFromBuffer(
-                    ibuf, BitmapPixelFormat.Bgra8, prepared.Width, prepared.Height, BitmapAlphaMode.Premultiplied))
+                bool choice1 = false;
+                string text1 = RunWinRtOcrSinglePass(eng, scaledBmp, out choice1);
+                if (!enhanceOcr)
                 {
-                    OcrResult res = AwaitWinRt(eng.RecognizeAsync(sb));
-                    if (res == null || res.Lines == null || res.Lines.Count == 0) return "";
+                    detectedChoiceLayout = choice1;
+                    return text1;
+                }
 
-                    if (res.Lines.Count >= 2 && res.Lines.Count <= 5)
-                    {
-                        int choiceMarkerLines = 0;
-                        foreach (OcrLine ln in res.Lines)
-                        {
-                            string t = ln.Text.Trim();
-                            if (Regex.IsMatch(t, @"^(?:[>▸►▶•]|\[?\d+[\]\.\)])")) choiceMarkerLines++;
-                        }
-                        if (choiceMarkerLines >= 1)
-                            detectedChoiceLayout = true;
-                    }
+                int score1 = ScoreOcrQuality(text1, srcLang);
+                // If Natural Super-Resolution already produced clean, high-confidence text (>= 86), return immediately (~12ms total!)
+                if (!string.IsNullOrWhiteSpace(text1) && score1 >= 86)
+                {
+                    detectedChoiceLayout = choice1;
+                    return text1;
+                }
 
-                    StringBuilder sbTxt = new StringBuilder();
-                    for (int i = 0; i < res.Lines.Count; i++)
+                // Pass 2: Achromatic Shadow-Contrast Top-Hat Isolation (eliminates blinding cutscene glare, Triforce rays, fire, or 3D background bark)
+                using (Bitmap topHatBmp = ExtractFloatingSubtitleTopHat(scaledBmp))
+                {
+                    bool choice2 = false;
+                    string text2 = RunWinRtOcrSinglePass(eng, topHatBmp, out choice2);
+                    int score2 = ScoreOcrQuality(text2, srcLang);
+
+                    if (score2 > score1 && !string.IsNullOrWhiteSpace(text2))
                     {
-                        if (i > 0) sbTxt.Append('\n');
-                        sbTxt.Append(res.Lines[i].Text);
+                        detectedChoiceLayout = choice2;
+                        return text2;
                     }
-                    return sbTxt.ToString();
+                    detectedChoiceLayout = choice1;
+                    return text1;
                 }
             }
-            catch (Exception ex) { error = "OCR error: " + ex.Message; return ""; }
-            finally { if (prepared != sourceBmp) prepared.Dispose(); }
+            catch (Exception ex)
+            {
+                error = "OCR error: " + ex.Message;
+                return "";
+            }
+            finally
+            {
+                if (scaledBmp != null && scaledBmp != sourceBmp)
+                    scaledBmp.Dispose();
+            }
         }
 
-        private static Bitmap PrepareForOcr(Bitmap bmp, bool enhanceGameOcr)
+        private static string RunWinRtOcrSinglePass(OcrEngine eng, Bitmap bmp, out bool detectedChoiceLayout)
+        {
+            detectedChoiceLayout = false;
+            if (bmp == null) return "";
+
+            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            byte[] buf = new byte[bd.Stride * bmp.Height];
+            try { Marshal.Copy(bd.Scan0, buf, 0, buf.Length); }
+            finally { bmp.UnlockBits(bd); }
+
+            var ibuf = CryptographicBuffer.CreateFromByteArray(buf);
+            using (SoftwareBitmap sb = SoftwareBitmap.CreateCopyFromBuffer(
+                ibuf, BitmapPixelFormat.Bgra8, bmp.Width, bmp.Height, BitmapAlphaMode.Premultiplied))
+            {
+                OcrResult res = AwaitWinRt(eng.RecognizeAsync(sb));
+                if (res == null || res.Lines == null || res.Lines.Count == 0) return "";
+
+                if (res.Lines.Count >= 2 && res.Lines.Count <= 5)
+                {
+                    int choiceMarkerLines = 0;
+                    foreach (OcrLine ln in res.Lines)
+                    {
+                        string t = ln.Text.Trim();
+                        if (Regex.IsMatch(t, @"^(?:[>▸►▶•]|\[?\d+[\]\.\)])")) choiceMarkerLines++;
+                    }
+                    if (choiceMarkerLines >= 1)
+                        detectedChoiceLayout = true;
+                }
+
+                StringBuilder sbTxt = new StringBuilder();
+                for (int i = 0; i < res.Lines.Count; i++)
+                {
+                    if (i > 0) sbTxt.Append('\n');
+                    sbTxt.Append(res.Lines[i].Text);
+                }
+                return sbTxt.ToString();
+            }
+        }
+
+        private static Bitmap UpscaleNaturalForOcr(Bitmap bmp)
         {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0) return bmp;
 
-            // Target optimal character height for WinRT OCR (approx 35-60px)
+            // Target optimal character height for WinRT OCR (approx 38-64px)
             float scale = 1.0f;
-            if (bmp.Height < 160) scale = 3.0f;
-            else if (bmp.Height < 380 && bmp.Width * 2 <= 3400) scale = 2.0f;
-            else if (bmp.Height < 550 && bmp.Width * 1.5f <= 3400) scale = 1.5f;
+            if (bmp.Height < 180) scale = 2.5f;
+            else if (bmp.Height < 400 && bmp.Width * 2 <= 3400) scale = 2.0f;
+            else if (bmp.Height < 600 && bmp.Width * 1.5f <= 3400) scale = 1.5f;
 
-            Bitmap target = bmp;
-            if (scale > 1.01f)
+            if (scale <= 1.01f) return bmp;
+
+            int nw = (int)(bmp.Width * scale);
+            int nh = (int)(bmp.Height * scale);
+            Bitmap up = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(up))
             {
-                int nw = (int)(bmp.Width * scale);
-                int nh = (int)(bmp.Height * scale);
-                Bitmap up = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
-                using (Graphics g = Graphics.FromImage(up))
-                {
-                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                    g.SmoothingMode = SmoothingMode.HighQuality;
-                    g.DrawImage(bmp, 0, 0, nw, nh);
-                }
-                target = up;
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.DrawImage(bmp, 0, 0, nw, nh);
             }
+            return up;
+        }
 
-            if (!enhanceGameOcr) return target;
-
-            // Intelligent Game Screen Contrast Enhancement & 3D Background Noise Suppression
-            Bitmap processed = (target == bmp) ? new Bitmap(bmp) : target;
-            BitmapData bd = processed.LockBits(new Rectangle(0, 0, processed.Width, processed.Height),
-                ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        private static Bitmap ExtractFloatingSubtitleTopHat(Bitmap scaledBmp)
+        {
+            int w = scaledBmp.Width, h = scaledBmp.Height;
+            Bitmap target = new Bitmap(scaledBmp);
+            BitmapData bd = target.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
             try
             {
-                int h = processed.Height, w = processed.Width;
-                int totalBytes = Math.Abs(bd.Stride) * h;
+                int stride = bd.Stride;
+                int totalBytes = Math.Abs(stride) * h;
                 byte[] raw = new byte[totalBytes];
                 Marshal.Copy(bd.Scan0, raw, 0, totalBytes);
 
-                // Sample brightness histogram using Max(R,G,B) to preserve colored dialogue text (Link green, Navi cyan, items)
-                int[] hist = new int[256];
-                int pixelCount = 0;
+                int darkCount = 0;
+                int totalPix = w * h;
                 for (int y = 0; y < h; y += 2)
                 {
-                    int row = y * bd.Stride;
+                    int row = y * stride;
                     for (int x = 0; x < w; x += 2)
                     {
                         int off = row + x * 4;
-                        byte b = raw[off];
-                        byte g = raw[off + 1];
-                        byte r = raw[off + 2];
-                        int maxC = Math.Max(r, Math.Max(g, b));
-                        int lum = (r * 77 + g * 150 + b * 29) >> 8;
-                        int val = (lum + maxC) >> 1;
-                        hist[val]++;
-                        pixelCount++;
+                        int lum = (raw[off + 2] * 77 + raw[off + 1] * 150 + raw[off] * 29) >> 8;
+                        if (lum < 100) darkCount += 4;
                     }
                 }
+                bool hasDarkBox = (darkCount > totalPix * 0.65);
 
-                int darkPixels = 0;
-                for (int i = 0; i < 115; i++) darkPixels += hist[i];
-                bool isDarkBg = (darkPixels > pixelCount * 0.50f);
-
-                // Otsu's optimal mathematical thresholding
-                int otsu = CalculateOtsuThreshold(hist, pixelCount);
-                int bgCutoff = isDarkBg ? Math.Min(125, Math.Max(50, otsu)) : Math.Max(130, Math.Min(200, otsu));
-
+                byte[] intensity = new byte[totalPix];
                 for (int y = 0; y < h; y++)
                 {
-                    int row = y * bd.Stride;
+                    int row = y * stride;
+                    int yw = y * w;
                     for (int x = 0; x < w; x++)
                     {
                         int off = row + x * 4;
-                        byte b = raw[off];
-                        byte g = raw[off + 1];
-                        byte r = raw[off + 2];
-
-                        int maxC = Math.Max(r, Math.Max(g, b));
+                        int b = raw[off], g = raw[off + 1], r = raw[off + 2];
                         int lum = (r * 77 + g * 150 + b * 29) >> 8;
-                        int val = (lum + maxC) >> 1;
+                        int maxC = Math.Max(r, Math.Max(g, b));
+                        int minC = Math.Min(r, Math.Min(g, b));
+                        int sat = maxC - minC;
 
-                        if (isDarkBg)
+                        // Dark dialog box: preserve colored text (Link green, Navi cyan, gold items)
+                        // Floating subtitle without background box: penalize saturated background glare (yellow Triforce, fire, sky)
+                        int val = hasDarkBox ? ((lum + maxC) >> 1) : Math.Max(0, minC - sat);
+                        intensity[yw + x] = (byte)Math.Min(255, val);
+                    }
+                }
+
+                // Separable 2D sliding minimum filter for Morphological White Top-Hat local contrast
+                int rad = 12;
+                byte[] hMin = new byte[totalPix];
+                for (int y = 0; y < h; y++)
+                {
+                    int yw = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        int x0 = Math.Max(0, x - rad), x1 = Math.Min(w - 1, x + rad);
+                        byte mn = 255;
+                        for (int xi = x0; xi <= x1; xi += 2)
                         {
-                            if (val <= bgCutoff)
-                            {
-                                // Zero-out translucent 3D background noise (bark, grass, particles)
-                                raw[off] = 0;
-                                raw[off + 1] = 0;
-                                raw[off + 2] = 0;
-                            }
-                            else
-                            {
-                                // Boost character text contrast towards crisp white
-                                float norm = (float)(val - bgCutoff) / Math.Max(1, 255 - bgCutoff);
-                                byte boosted = (byte)Math.Min(255, (int)(norm * 1.4f * 255f));
-                                raw[off] = boosted;
-                                raw[off + 1] = boosted;
-                                raw[off + 2] = boosted;
-                            }
+                            byte v = intensity[yw + xi];
+                            if (v < mn) mn = v;
                         }
-                        else
+                        hMin[yw + x] = mn;
+                    }
+                }
+
+                byte[] localMin = new byte[totalPix];
+                for (int y = 0; y < h; y++)
+                {
+                    int y0 = Math.Max(0, y - rad), y1 = Math.Min(h - 1, y + rad);
+                    int yw = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        byte mn = 255;
+                        for (int yi = y0; yi <= y1; yi += 2)
                         {
-                            // Light background games (speech bubbles, parchment paper)
-                            if (val >= bgCutoff)
-                            {
-                                // Clean background to pure white
-                                raw[off] = 255;
-                                raw[off + 1] = 255;
-                                raw[off + 2] = 255;
-                            }
-                            else
-                            {
-                                // Boost dark text towards crisp black
-                                float norm = (float)val / Math.Max(1, bgCutoff);
-                                byte darkened = (byte)Math.Max(0, (int)(norm * 0.7f * 255f));
-                                raw[off] = darkened;
-                                raw[off + 1] = darkened;
-                                raw[off + 2] = darkened;
-                            }
+                            byte v = hMin[yi * w + x];
+                            if (v < mn) mn = v;
                         }
+                        localMin[yw + x] = mn;
+                    }
+                }
+
+                for (int y = 0; y < h; y++)
+                {
+                    int row = y * stride;
+                    int yw = y * w;
+                    for (int x = 0; x < w; x++)
+                    {
+                        int off = row + x * 4;
+                        int val = intensity[yw + x];
+                        int lmin = localMin[yw + x];
+                        int tophat = val - lmin;
+
+                        byte ink = 0;
+                        int minVal = hasDarkBox ? 95 : 115;
+                        int minTopHat = hasDarkBox ? 28 : 34;
+                        if (val > minVal && tophat > minTopHat)
+                        {
+                            int boosted = (tophat - minTopHat) * 3;
+                            if (val > 180 && tophat > 55) boosted = Math.Max(boosted, val);
+                            ink = (byte)Math.Min(255, Math.Max(0, boosted));
+                        }
+
+                        // Render as crisp Black ink on pure White paper
+                        byte paper = (byte)(255 - ink);
+                        raw[off] = paper;
+                        raw[off + 1] = paper;
+                        raw[off + 2] = paper;
                     }
                 }
 
@@ -1182,43 +1241,73 @@ namespace TranslatorLive
             }
             finally
             {
-                processed.UnlockBits(bd);
+                target.UnlockBits(bd);
             }
-
-            return processed;
+            return target;
         }
 
-        public static int CalculateOtsuThreshold(int[] hist, int totalPixels)
+        public static int ScoreOcrQuality(string raw, string srcLang)
         {
-            if (totalPixels <= 0 || hist == null || hist.Length < 256) return 80;
+            if (string.IsNullOrWhiteSpace(raw)) return 0;
+            string s = raw.Trim();
+            if (s.Length < 2) return 0;
 
-            float sum = 0;
-            for (int i = 0; i < 256; i++) sum += i * hist[i];
+            bool isCjk = (srcLang == "ja" || srcLang == "zh-CN" || srcLang == "zh-TW" || srcLang == "ko");
+            int score = 100;
 
-            float sumB = 0;
-            int wB = 0;
-            float varMax = 0;
-            int threshold = 80;
-
-            for (int t = 0; t < 256; t++)
+            foreach (char c in s)
             {
-                wB += hist[t];
-                if (wB == 0) continue;
-                int wF = totalPixels - wB;
-                if (wF == 0) break;
-
-                sumB += (float)(t * hist[t]);
-                float mB = sumB / wB;
-                float mF = (sum - sumB) / wF;
-
-                float varBetween = (float)wB * (float)wF * (mB - mF) * (mB - mF);
-                if (varBetween > varMax)
-                {
-                    varMax = varBetween;
-                    threshold = t;
-                }
+                if (c == '<' || c == '>' || c == '*' || c == '&' || c == '~' || c == '^' || c == '|' || c == '_' || c == '#' || c == '@')
+                    score -= 16;
+                else if (!isCjk && c > 127 && c != '’' && c != '“' && c != '”' && c != '…' && c != '—' && c != '•')
+                    score -= 14;
             }
-            return threshold;
+
+            if (!isCjk)
+            {
+                // Penalize quote/bracket noise clusters inside words like 'l'herefore or t'(')
+                score -= Regex.Matches(s, @"[A-Za-z]['""\(\)\[\]]+[A-Za-z\(\)\[\]]").Count * 20;
+                score -= Regex.Matches(s, @"['""]{2,}|\(\)|\[\]|[:;]{2,}").Count * 18;
+
+                string[] words = Regex.Split(s, @"\s+");
+                int validWords = 0;
+                foreach (string w in words)
+                {
+                    string cleanW = Regex.Replace(w, @"[^A-Za-z]", "");
+                    if (cleanW.Length == 0) continue;
+                    if (cleanW.Length == 1 && cleanW != "I" && cleanW != "a" && cleanW != "A")
+                        score -= 12;
+                    else if (cleanW.Length >= 3 && !Regex.IsMatch(cleanW, @"[aeiouyAEIOUY]"))
+                        score -= 18;
+                    else
+                        validWords++;
+                }
+                if (validWords == 0) return 0;
+            }
+
+            return Math.Max(0, score);
+        }
+
+        public static bool IsMeaningfulSubtitle(string cleanText, string srcLang)
+        {
+            if (string.IsNullOrWhiteSpace(cleanText)) return false;
+            string s = cleanText.Trim();
+            bool isCjk = (srcLang == "ja" || srcLang == "zh-CN" || srcLang == "zh-TW" || srcLang == "ko");
+            if (isCjk) return s.Length >= 1;
+
+            // Reject pure punctuation/numbers or 1-character noise on moving video frames
+            string lettersOnly = Regex.Replace(s, @"[^A-Za-z]", "");
+            if (lettersOnly.Length < 2) return false;
+
+            // Require at least one vowel in English/Latin subtitles
+            if (!Regex.IsMatch(lettersOnly, @"[aeiouyAEIOUY]")) return false;
+
+            // If very short (2-3 letters total), ensure it's not random symbol noise
+            if (lettersOnly.Length <= 2 && s.Length <= 3)
+            {
+                return Regex.IsMatch(s, @"^(?:no|go|ok|oh|ah|hi|up|on|in|it|he|we|so|do|be|me|my|by|or|if|at|as|us|to)[\.\!\?]?$", RegexOptions.IgnoreCase);
+            }
+            return true;
         }
 
         public static string CleanGameOcrText(string text, string srcLang)
@@ -1309,19 +1398,27 @@ namespace TranslatorLive
             catch { return text; }
         }
 
-        private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 2400)
+        private static IPEndPoint BindIpv4Only(ServicePoint servicePoint, IPEndPoint remoteEndPoint, int retryCount)
+        {
+            if (remoteEndPoint.AddressFamily == AddressFamily.InterNetwork || retryCount > 2)
+                return new IPEndPoint(IPAddress.Any, 0);
+            throw new IOException("Skip IPv6 to prevent 2.5s timeout on IPv4-only ISP routes");
+        }
+
+        private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 1800)
         {
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.Proxy = null;
             req.KeepAlive = true;
             req.Timeout = timeoutMs;
             req.ReadWriteTimeout = timeoutMs;
-            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
             req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             try
             {
                 req.ServicePoint.UseNagleAlgorithm = false;
                 req.ServicePoint.Expect100Continue = false;
+                req.ServicePoint.BindIPEndPointDelegate = BindIpv4Only;
             }
             catch { }
 
@@ -1612,19 +1709,42 @@ namespace TranslatorLive
             catch (Exception ex) { error = "Gemini error: " + ex.Message; return ""; }
         }
 
+        private static readonly string[] GoogleGtxHosts = new string[]
+        {
+            "https://translate.googleapis.com/translate_a/single",
+            "https://translate.google.com/translate_a/single",
+            "https://translate.google.co.id/translate_a/single"
+        };
+
         private static string CallGoogleGtx(string text, string srcLang, string tgtLang, out string error)
         {
             error = "";
-            try
+            string sl = string.IsNullOrEmpty(srcLang) ? "auto" : srcLang;
+            string tl = string.IsNullOrEmpty(tgtLang) ? "id" : tgtLang;
+            string query = "?client=gtx&sl=" + Uri.EscapeDataString(sl) +
+                           "&tl=" + Uri.EscapeDataString(tl) +
+                           "&dt=t&q=" + Uri.EscapeDataString(text);
+
+            Exception lastEx = null;
+            for (int i = 0; i < GoogleGtxHosts.Length; i++)
             {
-                string sl = string.IsNullOrEmpty(srcLang) ? "auto" : srcLang;
-                string tl = string.IsNullOrEmpty(tgtLang) ? "id" : tgtLang;
-                string url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=" +
-                             Uri.EscapeDataString(sl) + "&tl=" + Uri.EscapeDataString(tl) +
-                             "&dt=t&q=" + Uri.EscapeDataString(text);
-                return ParseGoogleGtxJson(HttpRequestFast(url, null, "application/x-www-form-urlencoded", 2400));
+                try
+                {
+                    string json = HttpRequestFast(GoogleGtxHosts[i] + query, null, "application/x-www-form-urlencoded", 1300);
+                    string parsed = ParseGoogleGtxJson(json);
+                    if (!string.IsNullOrEmpty(parsed))
+                    {
+                        error = "";
+                        return parsed;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    lastEx = ex;
+                }
             }
-            catch (Exception ex) { error = "Google error: " + ex.Message; return ""; }
+            if (lastEx != null) error = "Google error: " + lastEx.Message;
+            return "";
         }
 
         private static string CallMyMemory(string text, string srcLang, string tgtLang, out string error)
