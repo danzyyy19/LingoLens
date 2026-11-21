@@ -49,6 +49,7 @@ namespace TranslatorLive
         private readonly Dictionary<int, bool> _idleHidden = new Dictionary<int, bool>();
         private readonly Dictionary<int, string> _pendingOcrByArea = new Dictionary<int, string>();
         private readonly Dictionary<int, int> _pendingCountByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, DateTime> _pendingStartUtc = new Dictionary<int, DateTime>();
         private readonly Dictionary<string, string> _cache = new Dictionary<string, string>();
         private readonly object _cacheLock = new object();
 
@@ -124,6 +125,7 @@ namespace TranslatorLive
                 _idleHidden.Remove(areaId);
                 _pendingOcrByArea.Remove(areaId);
                 _pendingCountByArea.Remove(areaId);
+                _pendingStartUtc.Remove(areaId);
             }
         }
 
@@ -139,6 +141,7 @@ namespace TranslatorLive
                 _idleHidden.Clear();
                 _pendingOcrByArea.Clear();
                 _pendingCountByArea.Clear();
+                _pendingStartUtc.Clear();
             }
         }
 
@@ -275,10 +278,10 @@ namespace TranslatorLive
                 if (!forced && hasPrev)
                 {
                     float diff = ComputeDiffPercent(sig, prevSig);
-                    if (diff < 1.8f)
+                    if (diff < 0.45f)
                     {
                         // CRITICAL FIX: If typewriter debouncer was waiting for typing to stop,
-                        // diff < 1.8f proves typing has finished! Flush pendingText immediately without re-running OCR!
+                        // diff < 0.45f proves typing has finished! Flush pendingText immediately without re-running OCR!
                         if (pendingCount > 0 && !string.IsNullOrEmpty(pendingText))
                         {
                             screenStatic = true;
@@ -323,14 +326,15 @@ namespace TranslatorLive
 
                     if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
                     {
+                        _pendingOcrByArea[area.Id] = "";
+                        _pendingCountByArea[area.Id] = 0;
+                        _pendingStartUtc.Remove(area.Id);
                         string oldT;
                         if (_lastTransByArea.TryGetValue(area.Id, out oldT) && !string.IsNullOrEmpty(oldT))
                         {
                             _lastOcrByArea[area.Id] = "";
                             _lastOcrScoreByArea[area.Id] = 0;
                             _lastTransByArea[area.Id] = "";
-                            _pendingOcrByArea[area.Id] = "";
-                            _pendingCountByArea[area.Id] = 0;
                             _idleHidden[area.Id] = true;
                             RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, "Kosong", false);
                         }
@@ -338,15 +342,16 @@ namespace TranslatorLive
                     }
 
                     newOcrScore = ScoreOcrQuality(cleanText, srcLang);
-                    if (!treatAsChoice && newOcrScore < 52)
+                    if (!treatAsChoice && newOcrScore < 42)
                     {
                         CheckIdleTimeout(area.Id, autoHideSec);
                         return;
                     }
 
-                    // Fast Multi-Sentence Typewriter Debouncer:
-                    // - On first frame of a brand-new dialogue box (when not yet complete or very short), wait 35ms to detect if a typewriter effect is actively streaming.
-                    // - While text is actively expanding (even across sentence periods like Sentence 1 "." -> Sentence 2), wait 35ms (or 90ms at sentence punctuation pauses) until typing stops!
+                    // Fast Multi-Sentence Typewriter Debouncer with Progressive Live Flush:
+                    // - Instant full subtitles (>= 22 chars and ends with '.', '!', '?', '"', '...') translate IMMEDIATELY in 0ms on first sighting!
+                    // - Short or incomplete newly-appearing text waits one 35ms tick to detect if a typewriter effect is actively streaming.
+                    // - If a typewriter is streaming long multi-sentence dialogue, flush an intermediate live translation every ~550ms so the user NEVER sees an empty/frozen overlay during long speeches!
                     if (!forced && !treatAsChoice)
                     {
                         bool isTerminal = EndsWithTerminalPunctuation(cleanText);
@@ -364,37 +369,52 @@ namespace TranslatorLive
 
                         if (isNewUnconfirmed)
                         {
-                            // WaitStable mode: wait one confirmation tick until text stops changing completely
-                            if (waitStable && (pendingCount == 0 || coreClean != corePend) && pendingCount < 25)
+                            DateTime pendStart;
+                            if (!_pendingStartUtc.TryGetValue(area.Id, out pendStart) || pendingCount == 0)
                             {
-                                _pendingOcrByArea[area.Id] = cleanText;
-                                _pendingCountByArea[area.Id] = pendingCount + 1;
-                                _fastPollMs = 55;
-                                return;
+                                pendStart = DateTime.UtcNow;
+                                _pendingStartUtc[area.Id] = pendStart;
                             }
+                            double waitedMs = (DateTime.UtcNow - pendStart).TotalMilliseconds;
 
-                            // First sighting of a new incomplete or short text: do a 35ms check to see if it's typing out
-                            if (pendingCount == 0 && (!isTerminal || coreClean.Length < 42))
+                            // Progressive Live Flush: never hold a subtitle waiting for more than 520ms (or 850ms if WaitStable is explicitly enabled)
+                            double maxHoldMs = waitStable ? 850.0 : 520.0;
+                            if (waitedMs < maxHoldMs)
                             {
-                                _pendingOcrByArea[area.Id] = cleanText;
-                                _pendingCountByArea[area.Id] = 1;
-                                _fastPollMs = 35;
-                                return;
-                            }
+                                // WaitStable mode: wait one confirmation tick until text stops changing
+                                if (waitStable && (pendingCount == 0 || coreClean != corePend) && pendingCount < 16)
+                                {
+                                    _pendingOcrByArea[area.Id] = cleanText;
+                                    _pendingCountByArea[area.Id] = pendingCount + 1;
+                                    _fastPollMs = 45;
+                                    return;
+                                }
 
-                            // Actively growing typewriter stream (including multi-sentence paragraphs where Sentence 1 ends with '.' while Sentence 2 is typing)
-                            if (isExpanding && pendingCount < 24)
-                            {
-                                _pendingOcrByArea[area.Id] = cleanText;
-                                _pendingCountByArea[area.Id] = pendingCount + 1;
-                                // RPG typewriters pause ~70-90ms at periods/commas before typing the next sentence
-                                _fastPollMs = (isTerminal || cleanText.EndsWith(",")) ? 85 : 35;
-                                return;
+                                // First sighting of a new incomplete or very short (< 22 chars) text: do a 30ms check to see if it's typing out.
+                                // Complete video subtitles (>= 22 chars ending with '.', '!', '?') skip this and translate IMMEDIATELY in 0ms!
+                                if (pendingCount == 0 && (!isTerminal || coreClean.Length < 22))
+                                {
+                                    _pendingOcrByArea[area.Id] = cleanText;
+                                    _pendingCountByArea[area.Id] = 1;
+                                    _fastPollMs = 30;
+                                    return;
+                                }
+
+                                // Actively growing typewriter stream
+                                if (isExpanding && pendingCount < 12)
+                                {
+                                    _pendingOcrByArea[area.Id] = cleanText;
+                                    _pendingCountByArea[area.Id] = pendingCount + 1;
+                                    _fastPollMs = (isTerminal || cleanText.EndsWith(",")) ? 65 : 30;
+                                    return;
+                                }
                             }
                         }
 
+                        // Flushing to translation now: keep cleanText in _pendingOcrByArea so if the typewriter continues after a progressive flush, isExpanding still tracks it!
                         _pendingOcrByArea[area.Id] = cleanText;
                         _pendingCountByArea[area.Id] = 0;
+                        _pendingStartUtc[area.Id] = DateTime.UtcNow;
                     }
                 }
 
@@ -418,38 +438,42 @@ namespace TranslatorLive
                         return;
                     }
 
-                    // 1b. Multi-sentence paragraph expansion: if new text appends a new clause/sentence (>= 4 chars longer and starts with previous text), ALWAYS translate immediately!
-                    bool isParagraphExpansion = coreNew.Length >= corePrev.Length + 4 &&
+                    // 1b. Multi-sentence paragraph expansion: if new text appends a new word/clause/sentence (>= 3 chars longer and matches prefix), ALWAYS translate immediately!
+                    bool isParagraphExpansion = coreNew.Length >= corePrev.Length + 3 &&
                         (coreNew.StartsWith(corePrev, StringComparison.OrdinalIgnoreCase) ||
-                         (corePrev.Length >= 8 && ComputeSimilarity(coreNew.Substring(0, corePrev.Length), corePrev) >= 0.80f));
+                         (corePrev.Length >= 5 && ComputeSimilarity(coreNew.Substring(0, corePrev.Length), corePrev) >= 0.72f));
 
                     if (!isParagraphExpansion)
                     {
-                        // 2. If previous subtitle was already complete & high-quality, lock it if new scan is just a minor variation or shorter substring
+                        // 2. If previous subtitle was already complete & high-quality, lock it ONLY if new scan is a shorter/equal noisy variation (never block a longer sentence!)
                         bool prevWasComplete = EndsWithTerminalPunctuation(prevOcr) && prevOcrScore >= 82;
-                        if (prevWasComplete && corePrev.Length >= 12 && (coreNew.Contains(corePrev) || corePrev.Contains(coreNew)) &&
-                            coreNew.Length <= corePrev.Length + 3)
+                        if (prevWasComplete && corePrev.Length >= 12 && corePrev.Contains(coreNew) &&
+                            coreNew.Length <= corePrev.Length)
                         {
                             _lastActiveUtc[area.Id] = DateTime.UtcNow;
                             CheckIdleTimeout(area.Id, autoHideSec);
                             return;
                         }
 
-                        // 3. High semantic similarity check
+                        // 3. High semantic similarity check (only when lengths are within 4 chars so growing sentences are never locked out)
+                        int lenDiff = Math.Abs(coreNew.Length - corePrev.Length);
                         int dist = LevenshteinDistance(coreNew, corePrev);
                         int maxLen = Math.Max(coreNew.Length, corePrev.Length);
                         bool isSameSentence = false;
 
-                        if (maxLen <= 25 && dist <= 2) isSameSentence = true;
-                        else if (maxLen <= 60 && dist <= 3) isSameSentence = true;
-                        else if (ComputeSimilarity(coreNew, corePrev) >= 0.80f) isSameSentence = true;
+                        if (lenDiff <= 4)
+                        {
+                            if (maxLen <= 25 && dist <= 2) isSameSentence = true;
+                            else if (maxLen <= 60 && dist <= 3) isSameSentence = true;
+                            else if (ComputeSimilarity(coreNew, corePrev) >= 0.85f) isSameSentence = true;
+                        }
 
                         if (isSameSentence)
                         {
-                            // Only upgrade if previous scan was noisy (< 82) and new scan is cleaner,
+                            // Only upgrade if previous scan was noisy (< 85) and new scan is cleaner,
                             // OR if previous scan was an incomplete sentence that just finished typing its ending
-                            bool prevIncomplete = !EndsWithTerminalPunctuation(prevOcr) && EndsWithTerminalPunctuation(cleanText) && coreNew.Length > corePrev.Length + 2;
-                            bool fixedSevereNoise = (prevOcrScore < 82 && newOcrScore >= prevOcrScore + 8);
+                            bool prevIncomplete = !EndsWithTerminalPunctuation(prevOcr) && EndsWithTerminalPunctuation(cleanText);
+                            bool fixedSevereNoise = (prevOcrScore < 85 && newOcrScore >= prevOcrScore + 6);
                             if (!prevIncomplete && !fixedSevereNoise)
                             {
                                 _lastActiveUtc[area.Id] = DateTime.UtcNow;
@@ -979,7 +1003,7 @@ namespace TranslatorLive
 
         private static byte[] ComputeSignature(Bitmap bmp)
         {
-            const int sw = 32, sh = 16;
+            const int sw = 48, sh = 24;
             byte[] sig = new byte[sw * sh];
             using (Bitmap small = new Bitmap(sw, sh, PixelFormat.Format32bppArgb))
             {
@@ -1012,7 +1036,7 @@ namespace TranslatorLive
         {
             if (a == null || b == null || a.Length != b.Length || a.Length == 0) return 100f;
             int changed = 0;
-            for (int i = 0; i < a.Length; i++) if (Math.Abs(a[i] - b[i]) > 12) changed++;
+            for (int i = 0; i < a.Length; i++) if (Math.Abs(a[i] - b[i]) > 8) changed++;
             return (changed * 100f) / a.Length;
         }
 
@@ -1154,34 +1178,62 @@ namespace TranslatorLive
                     : ((srcStride == w * 4) ? srcBuf : ScaleAndProcessRawBgra(srcBuf, w, h, srcStride, w, h, false));
 
                 bool choice1 = false;
-                string text1 = RunWinRtOcrFromBuffer(eng, pass1Buf, nw, nh, srcLang, out choice1);
+                string raw1 = RunWinRtOcrFromBuffer(eng, pass1Buf, nw, nh, srcLang, out choice1);
+                string clean1 = choice1 ? NormalizeChoices(raw1, srcLang) : NormalizeText(raw1, srcLang, true);
                 if (!enhanceOcr)
                 {
                     detectedChoiceLayout = choice1;
-                    return text1;
+                    return raw1;
                 }
 
-                int score1 = ScoreOcrQuality(text1, srcLang);
-                // If Pass 1 already produced clean, high-confidence text (>= 90), return immediately (~45ms total!)
-                if (score1 >= 90 && !string.IsNullOrWhiteSpace(text1))
+                int score1 = ScoreOcrQuality(clean1, srcLang);
+                // If Pass 1 already produced clean, high-confidence text (>= 88), return immediately (~35ms total!)
+                if (score1 >= 88 && !string.IsNullOrWhiteSpace(clean1))
                 {
                     detectedChoiceLayout = choice1;
-                    return text1;
+                    return raw1;
                 }
 
                 // Pass 2: Smooth Achromatic Glare Suppression on the already-upscaled buffer (~3ms in-memory transform + ~18ms OCR!)
                 byte[] pass2Buf = ApplySmoothAchromaticInPlaceOrCopy(pass1Buf, nw, nh);
                 bool choice2 = false;
-                string text2 = RunWinRtOcrFromBuffer(eng, pass2Buf, nw, nh, srcLang, out choice2);
-                int score2 = ScoreOcrQuality(text2, srcLang);
+                string raw2 = RunWinRtOcrFromBuffer(eng, pass2Buf, nw, nh, srcLang, out choice2);
+                string clean2 = choice2 ? NormalizeChoices(raw2, srcLang) : NormalizeText(raw2, srcLang, true);
+                int score2 = ScoreOcrQuality(clean2, srcLang);
 
-                if (score2 > score1 && !string.IsNullOrWhiteSpace(text2))
+                string bestRaw = raw1;
+                string bestClean = clean1;
+                int bestScore = score1;
+                bool bestChoice = choice1;
+
+                if (!string.IsNullOrWhiteSpace(clean2) && (score2 > bestScore || (score2 == bestScore && clean2.Length > bestClean.Length + 3)))
                 {
-                    detectedChoiceLayout = choice2;
-                    return text2;
+                    bestRaw = raw2;
+                    bestClean = clean2;
+                    bestScore = score2;
+                    bestChoice = choice2;
                 }
-                detectedChoiceLayout = choice1;
-                return text1;
+
+                // Pass 3: High-Contrast Bright-Core Subtitle Isolation (only when Pass 1 & Pass 2 both struggled < 78 or returned empty on extreme 3D video scenes)
+                if (bestScore < 78 || string.IsNullOrWhiteSpace(bestClean))
+                {
+                    byte[] pass3Buf = ApplyHighContrastSubtitleCore(pass1Buf, nw, nh);
+                    bool choice3 = false;
+                    string raw3 = RunWinRtOcrFromBuffer(eng, pass3Buf, nw, nh, srcLang, out choice3);
+                    string clean3 = choice3 ? NormalizeChoices(raw3, srcLang) : NormalizeText(raw3, srcLang, true);
+                    int score3 = ScoreOcrQuality(clean3, srcLang);
+
+                    if (!string.IsNullOrWhiteSpace(clean3) && (score3 > bestScore || (score3 == bestScore && clean3.Length > bestClean.Length + 3)))
+                    {
+                        bestRaw = raw3;
+                        bestClean = clean3;
+                        bestScore = score3;
+                        bestChoice = choice3;
+                    }
+                }
+
+                detectedChoiceLayout = bestChoice;
+                return bestRaw;
             }
             catch (Exception ex)
             {
@@ -1266,6 +1318,28 @@ namespace TranslatorLive
                 int sat = maxC - minC;
                 int val = minC - ((sat * 3) >> 2);
                 byte v = (byte)(val > 0 ? val : 0);
+                dst[off] = v;
+                dst[off + 1] = v;
+                dst[off + 2] = v;
+                dst[off + 3] = 255;
+            }
+            return dst;
+        }
+
+        private static byte[] ApplyHighContrastSubtitleCore(byte[] srcBgra, int w, int h)
+        {
+            byte[] dst = new byte[srcBgra.Length];
+            int len = w * h * 4;
+            for (int off = 0; off < len; off += 4)
+            {
+                byte b = srcBgra[off], g = srcBgra[off + 1], r = srcBgra[off + 2];
+                byte minC = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                byte maxC = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                int sat = maxC - minC;
+                // Heavily suppress colored 3D background pixels (sat * 1.5) and stretch luminance contrast around subtitle white/light-gray range (135..235)
+                int achrom = minC - ((sat * 3) >> 1);
+                int stretched = (achrom - 115) * 255 / 115;
+                byte v = (byte)(stretched < 0 ? 0 : (stretched > 255 ? 255 : stretched));
                 dst[off] = v;
                 dst[off + 1] = v;
                 dst[off + 2] = v;
