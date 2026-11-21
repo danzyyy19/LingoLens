@@ -31,6 +31,7 @@ $SrcFiles = @(
     (Join-Path $Root "src\AppConfig.cs"),
     (Join-Path $Root "src\Theme.cs"),
     (Join-Path $Root "src\TranslationEngine.cs"),
+    (Join-Path $Root "src\UpdateChecker.cs"),
     (Join-Path $Root "src\OverlayManager.cs"),
     (Join-Path $Root "src\MainWindow.cs"),
     (Join-Path $Root "src\Program.cs")

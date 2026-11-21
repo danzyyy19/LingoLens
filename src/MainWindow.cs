@@ -69,6 +69,8 @@ namespace TranslatorLive
         private string _lastTipId = "";
         private int _lastTipIdx = -1;
         private Image _logoBmp;
+        private bool _showUpdateBanner = false;
+        private bool _dismissUpdateBanner = false;
 
         private string T(string id, string en) { return _cfg.UiLang == "en" ? en : id; }
 
@@ -215,6 +217,43 @@ namespace TranslatorLive
             m.Items.Add("Keluar", null, delegate { _forceExit = true; Close(); });
             _tray.ContextMenuStrip = m;
             _tray.DoubleClick += delegate { RestoreFromTray(); };
+            _tray.BalloonTipClicked += delegate
+            {
+                RestoreFromTray();
+                _tab = 3;
+                _scrollY = 0f;
+                Invalidate();
+            };
+
+            UpdateChecker.OnStatusChanged += delegate
+            {
+                try
+                {
+                    if (IsHandleCreated && !IsDisposed)
+                    {
+                        BeginInvoke((Action)(() =>
+                        {
+                            if (UpdateChecker.Info.HasUpdate && !_dismissUpdateBanner)
+                            {
+                                _showUpdateBanner = true;
+                                if (_cfg.TrayTipShown && _tray != null)
+                                {
+                                    _tray.ShowBalloonTip(3500, "LingoLens Update Tersedia",
+                                        "Versi " + UpdateChecker.Info.LatestVersion + " telah dirilis oleh Danzyyy! Klik untuk memperbarui.",
+                                        ToolTipIcon.Info);
+                                }
+                            }
+                            Invalidate();
+                        }));
+                    }
+                }
+                catch { }
+            };
+
+            if (_cfg.AutoCheckUpdate)
+            {
+                UpdateChecker.CheckAsync(silent: true);
+            }
         }
 
         private void LoadFonts()
@@ -828,6 +867,15 @@ namespace TranslatorLive
                         act ? pal.Text : pal.TextSub, 1.65f);
                     Theme.DrawTextLeft(g, navNames[i], act ? fBodyB : fBody, act ? pal.Text : pal.TextSub,
                         SR(nr.X + S(34f), nr.Y, nr.Width - S(40f), nr.Height));
+
+                    if (i == 3 && UpdateChecker.Info.HasUpdate)
+                    {
+                        float badgeW = S(36f), badgeH = S(16f);
+                        RectangleF badgeR = SR(nr.Right - badgeW - S(8f), nr.Y + (nr.Height - badgeH) * 0.5f, badgeW, badgeH);
+                        Theme.FillRR(g, badgeR, badgeH * 0.5f, pal.Accent);
+                        Theme.DrawTextCenter(g, "NEW", fCap, pal.AccentBtnText, badgeR);
+                    }
+
                     _hits.Add(new Hit { Id = "TAB_" + i, Kind = HitKind.Button, Box = nr, Index = i });
                 }
 
@@ -878,6 +926,32 @@ namespace TranslatorLive
 
                 // 3. MAIN VIEWPORT
                 RectangleF vp = SR(sideW, topH, cw - sideW, ch - topH);
+
+                if (_showUpdateBanner && !_dismissUpdateBanner && UpdateChecker.Info.HasUpdate)
+                {
+                    float banH = S(38f);
+                    RectangleF banR = SR(vp.X + S(16f), vp.Y + S(6f), vp.Width - S(32f), banH);
+                    Theme.FillRR(g, banR, S(8f), pal.Dark ? Color.FromArgb(42, 32, 24) : Color.FromArgb(254, 243, 199));
+                    Theme.DrawRR(g, banR, S(8f), pal.Accent, 1f);
+
+                    float icSz = S(15f);
+                    Theme.DrawIcon(g, IconKind.Rocket, SR(banR.X + S(12f), banR.Y + (banH - icSz) * 0.5f, icSz, icSz), pal.Accent, 1.8f);
+
+                    string banTxt = T("Pembaruan Tersedia: " + UpdateChecker.Info.ReleaseName + " siap diunduh!",
+                                      "Update Available: " + UpdateChecker.Info.ReleaseName + " is ready!");
+                    Theme.DrawTextLeft(g, banTxt, fSmB, pal.Dark ? Color.FromArgb(254, 215, 170) : Color.FromArgb(154, 52, 18),
+                        SR(banR.X + S(36f), banR.Y, Math.Max(S(100f), banR.Width - S(220f)), banH));
+
+                    float btnW = S(126f);
+                    RectangleF btnView = SR(banR.Right - btnW - S(36f), banR.Y + S(5f), btnW, banH - S(10f));
+                    DrawAccentBtn(g, pal, "BANNER_UPDATE", btnView, T("Lihat Update", "View Update"), IconKind.Rocket, pal.Accent, pal.AccentHover, fCap, S(6f));
+
+                    RectangleF btnClose = SR(banR.Right - S(32f), banR.Y + S(5f), S(26f), banH - S(10f));
+                    DrawChromeIcon(g, pal, "BANNER_DISMISS", btnClose, IconKind.Close, false);
+
+                    vp = SR(vp.X, vp.Y + banH + S(8f), vp.Width, vp.Height - banH - S(8f));
+                }
+
                 GraphicsState vpState = g.Save();
                 g.SetClip(vp);
 
@@ -1462,7 +1536,7 @@ namespace TranslatorLive
             float colGap = S(14f);
             bool twoCol = (w >= S(620f));
             float colW = twoCol ? (w - colGap) * 0.5f : w;
-            float colH = S(596f);
+            float colH = S(640f);
 
             RectangleF left = SR(x, cy, colW, colH);
             Theme.DrawCard(g, pal, left, S(16f));
@@ -1504,7 +1578,8 @@ namespace TranslatorLive
             DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(38f)), T("Gabung baris (mode Dialog)", "Merge lines (Dialog mode)"), _cfg.MergeLines, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(38f)), T("Sembunyikan kotak saat kosong", "Hide overlay when empty"), _cfg.HideEmpty, fBody); ly += S(44f);
             DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(38f)), T("Otomatis Live saat dibuka", "Auto-start Live on launch"), _cfg.AutoLive, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), T("Tutup ke System Tray", "Minimize to System Tray on close"), _cfg.CloseToTray, fBody); ly += S(48f);
+            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), T("Tutup ke System Tray", "Minimize to System Tray on close"), _cfg.CloseToTray, fBody); ly += S(44f);
+            DrawToggleRow(g, pal, "SYS_AUTO_UPDATE", SR(lx, ly, lw2, S(38f)), T("Periksa Pembaruan Otomatis", "Check updates automatically"), _cfg.AutoCheckUpdate, fBody); ly += S(48f);
 
             float halfBtn = (lw2 - S(8f)) * 0.5f;
             int glossCount = string.IsNullOrWhiteSpace(_cfg.Glossary) ? 0 : _cfg.Glossary.Split(new char[] { ';', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries).Length;
@@ -1591,6 +1666,59 @@ namespace TranslatorLive
                 Theme.DrawTextLeft(g, T("Dibuat oleh Danzyyy", "Created by Danzyyy"), fSmB, pal.TextSub, SR(x, cy, w, S(24f)));
                 cy += S(32f);
             }
+
+            // 0. UPDATE STATUS & ACTION CARD
+            bool hasUp = UpdateChecker.Info.HasUpdate;
+            bool isChecking = UpdateChecker.Info.IsChecking;
+            float chkH = S(106f);
+            RectangleF upCard = SR(x, cy, w, chkH);
+            Theme.DrawCard(g, pal, upCard, S(16f));
+
+            float icSz = S(22f);
+            Color icCol = hasUp ? pal.Accent : (isChecking ? pal.TextSub : (pal.Dark ? Color.FromArgb(74, 222, 128) : Color.FromArgb(34, 197, 94)));
+            Theme.DrawIcon(g, hasUp ? IconKind.Rocket : (isChecking ? IconKind.Refresh : IconKind.Check),
+                SR(upCard.X + S(18f), upCard.Y + S(18f), icSz, icSz), icCol, 2f);
+
+            string statusTitle = hasUp
+                ? T("🎉 Tersedia Pembaruan: " + UpdateChecker.Info.LatestVersion + "!", "🎉 New Update Available: " + UpdateChecker.Info.LatestVersion + "!")
+                : (isChecking
+                    ? T("Memeriksa Pembaruan ke GitHub...", "Checking for updates on GitHub...")
+                    : T("LingoLens v0.2 Beta — Versi Terbaru", "LingoLens v0.2 Beta — Latest Version"));
+
+            string statusDesc = hasUp
+                ? T("Rilis resmi terbaru dari Danzyyy telah tersedia di GitHub. Klik tombol untuk mengunduh sekarang.",
+                    "Latest official release by Danzyyy is now live on GitHub. Click button to download now.")
+                : (UpdateChecker.Info.LastChecked.HasValue
+                    ? T("Terakhir dicek: " + UpdateChecker.Info.LastChecked.Value.ToString("HH:mm:ss") + " • Aplikasi Anda sudah menggunakan versi paling mutakhir.",
+                        "Last checked: " + UpdateChecker.Info.LastChecked.Value.ToString("HH:mm:ss") + " • Your app is fully up-to-date.")
+                    : T("Klik 'Periksa Pembaruan' untuk memeriksa rilis terbaru langsung dari GitHub.",
+                        "Click 'Check for Updates' to fetch latest releases directly from GitHub."));
+
+            float txtW = Math.Max(S(120f), upCard.Width - S(330f));
+            Theme.DrawTextLeft(g, statusTitle, fSec, pal.Text, SR(upCard.X + S(48f), upCard.Y + S(14f), txtW, S(26f)));
+            Theme.DrawTextWrap(g, statusDesc, fSm, pal.TextSub, SR(upCard.X + S(48f), upCard.Y + S(42f), txtW, S(48f)));
+
+            // Action buttons on the right
+            float btnRowW = hasUp ? S(266f) : S(176f);
+            float btnX = upCard.Right - btnRowW - S(18f);
+            float btnY = upCard.Y + (chkH - S(36f)) * 0.5f;
+
+            if (hasUp)
+            {
+                RectangleF btnDown = SR(btnX, btnY, S(130f), S(36f));
+                DrawAccentBtn(g, pal, "BTN_DOWNLOAD_UPDATE", btnDown, T("Unduh Update", "Download"), IconKind.Download, pal.Accent, pal.AccentHover, fSmB, S(8f));
+
+                RectangleF btnRel = SR(btnX + S(136f), btnY, S(130f), S(36f));
+                DrawOutlineBtn(g, pal, "BTN_OPEN_RELEASE", btnRel, T("Halaman Rilis", "Release Page"), IconKind.Rocket, fSmB, S(8f));
+            }
+            else
+            {
+                RectangleF btnChk = SR(btnX, btnY, S(176f), S(36f));
+                string btnTxt = isChecking ? T("Memeriksa...", "Checking...") : T("Periksa Pembaruan", "Check for Updates");
+                DrawOutlineBtn(g, pal, "BTN_CHECK_UPDATE", btnChk, btnTxt, IconKind.Refresh, fSmB, S(8f));
+            }
+
+            cy += chkH + S(16f);
 
             // Card v0.2 Beta
             RectangleF card2 = SR(x, cy, w, S(250f));
@@ -2136,6 +2264,24 @@ namespace TranslatorLive
                 case "SYS_TRAY":
                     return T("Minimalkan ke System Tray saat tombol minimize ditekan", "Minimize to system tray when minimize button is clicked");
 
+                case "SYS_AUTO_UPDATE":
+                    return T("Otomatis periksa pembaruan rilis baru dari GitHub setiap kali aplikasi dibuka", "Automatically check for new releases on GitHub when app starts");
+
+                case "BANNER_UPDATE":
+                    return T("Buka tab Pembaruan untuk melihat catatan rilis dan mengunduh versi terbaru", "Open Changelog tab to see latest release details");
+
+                case "BANNER_DISMISS":
+                    return T("Tutup pemberitahuan pembaruan ini", "Dismiss this update notification");
+
+                case "BTN_CHECK_UPDATE":
+                    return T("Periksa versi terbaru LingoLens dari GitHub sekarang", "Check for newer LingoLens versions on GitHub now");
+
+                case "BTN_DOWNLOAD_UPDATE":
+                    return T("Unduh file pembaruan terbaru LingoLens dari GitHub", "Download latest LingoLens release file from GitHub");
+
+                case "BTN_OPEN_RELEASE":
+                    return T("Buka halaman rilis resmi LingoLens di browser", "Open official LingoLens GitHub releases page in browser");
+
                 case "TOG_BOLD":
                     return T("Tebalkan huruf teks terjemahan", "Toggle bold text styling");
 
@@ -2409,6 +2555,13 @@ namespace TranslatorLive
                 case "SYS_HIDEEMPTY": _cfg.HideEmpty = !_cfg.HideEmpty; _cfg.Save(); _overlay.UpdateTexts(); Invalidate(); break;
                 case "SYS_AUTOLIVE": _cfg.AutoLive = !_cfg.AutoLive; _cfg.Save(); Invalidate(); break;
                 case "SYS_TRAY": _cfg.CloseToTray = !_cfg.CloseToTray; _cfg.Save(); Invalidate(); break;
+                case "SYS_AUTO_UPDATE": _cfg.AutoCheckUpdate = !_cfg.AutoCheckUpdate; _cfg.Save(); Invalidate(); break;
+
+                case "BANNER_UPDATE": _tab = 3; _scrollY = 0f; Invalidate(); break;
+                case "BANNER_DISMISS": _dismissUpdateBanner = true; Invalidate(); break;
+                case "BTN_CHECK_UPDATE": UpdateChecker.CheckAsync(silent: false); Invalidate(); break;
+                case "BTN_DOWNLOAD_UPDATE": UpdateChecker.OpenDownloadUrl(); break;
+                case "BTN_OPEN_RELEASE": UpdateChecker.OpenReleaseUrl(); break;
 
                 case "BTN_COPY":
                     if (!string.IsNullOrEmpty(_liveResult))

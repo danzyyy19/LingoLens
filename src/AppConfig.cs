@@ -77,6 +77,7 @@ namespace TranslatorLive
         public bool AutoLive = false;
         public bool CloseToTray = true;
         public bool TrayTipShown = false;
+        public bool AutoCheckUpdate = true;
 
         public int Placement = 0; // 0 = terpisah, 1 = tutup asli, 2 = gabung
         public Rectangle MergedRect = Rectangle.Empty;
@@ -254,6 +255,7 @@ namespace TranslatorLive
                     sb.AppendLine("autoLive=" + (AutoLive ? 1 : 0));
                     sb.AppendLine("closeToTray=" + (CloseToTray ? 1 : 0));
                     sb.AppendLine("trayTip=" + (TrayTipShown ? 1 : 0));
+                    sb.AppendLine("autoCheckUpdate=" + (AutoCheckUpdate ? 1 : 0));
                     sb.AppendLine("placement=" + Placement);
                     sb.AppendLine("merged=" + R(MergedRect));
                     sb.AppendLine("globalStyle=" + SerializeStyle(GlobalStyle));
@@ -306,6 +308,7 @@ namespace TranslatorLive
                         case "autoLive": c.AutoLive = n != 0; break;
                         case "closeToTray": c.CloseToTray = n != 0; break;
                         case "trayTip": c.TrayTipShown = n != 0; break;
+                        case "autoCheckUpdate": c.AutoCheckUpdate = n != 0; break;
                         case "placement": c.Placement = Math.Max(0, Math.Min(2, n)); break;
                         case "merged": c.MergedRect = ParseRect(v); break;
                         case "globalStyle": c.GlobalStyle = ParseStyle(v, c.GlobalStyle); break;

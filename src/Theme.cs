@@ -40,7 +40,8 @@ namespace TranslatorLive
         History,
         Settings,
         ScanArea,
-        Rocket
+        Rocket,
+        Download
     }
 
     public class Palette
@@ -635,6 +636,21 @@ namespace TranslatorLive
                             // Exhaust flame
                             g.DrawLine(p, x + 9.5f * rsx, y + 14.5f * rsy, x + 5f * rsx, y + 19f * rsy);
                             g.DrawLine(p, x + 8f * rsx, y + 13f * rsy, x + 4f * rsx, y + 17f * rsy);
+                            break;
+
+                        case IconKind.Download:
+                            float dsx = w / 24f, dsy = h / 24f;
+                            g.DrawLine(p, cx, y + 3.5f * dsy, cx, y + 14.5f * dsy);
+                            g.DrawLine(p, cx - 4f * dsx, y + 11f * dsy, cx, y + 15f * dsy);
+                            g.DrawLine(p, cx, y + 15f * dsy, cx + 4f * dsx, y + 11f * dsy);
+                            PointF[] trayPts = new PointF[]
+                            {
+                                new PointF(x + 4.5f * dsx, y + 13.5f * dsy),
+                                new PointF(x + 4.5f * dsx, y + 19.5f * dsy),
+                                new PointF(x + 19.5f * dsx, y + 19.5f * dsy),
+                                new PointF(x + 19.5f * dsx, y + 13.5f * dsy)
+                            };
+                            g.DrawLines(p, trayPts);
                             break;
 
                         case IconKind.Sliders:
