@@ -483,6 +483,7 @@ namespace TranslatorLive
             }
 
             _engine.SetRunning(next);
+            try { if (IsHandleCreated) Native.SetWindowDisplayAffinity(Handle, next ? 0x00000011u : 0x00000000u); } catch { }
             _overlay.UserHidden = false;
             _overlay.SetLiveVisible(next);
             _liveStatus = next ? "Memindai..." : "Berhenti";
