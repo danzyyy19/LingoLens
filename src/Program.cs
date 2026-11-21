@@ -124,26 +124,30 @@ namespace TranslatorLive
                             return 1;
                         }
 
-                        // Test Floating Cutscene Subtitle (White font without black box over bright golden glow)
-                        using (Bitmap glowBmp = new Bitmap(720, 140, PixelFormat.Format32bppArgb))
+                        // Test Floating Cutscene Subtitle (White font without black box over bright golden glow) + High-Res Speed Benchmark (1437x345)
+                        using (Bitmap glowBmp = new Bitmap(1437, 345, PixelFormat.Format32bppArgb))
                         {
                             using (Graphics gg = Graphics.FromImage(glowBmp))
                             {
                                 gg.Clear(Color.FromArgb(225, 185, 85)); // Bright golden Triforce-like background
                                 gg.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
                                 using (System.Drawing.Drawing2D.GraphicsPath gp = new System.Drawing.Drawing2D.GraphicsPath())
-                                using (Font ff = new Font("Georgia", 22f, FontStyle.Regular))
+                                using (Font ff = new Font("Georgia", 28f, FontStyle.Regular))
                                 {
-                                    gp.AddString("Therefore, it is forbidden to\ntouch the Triforce carelessly.", ff.FontFamily, 0, 27f, new PointF(24f, 24f), StringFormat.GenericTypographic);
-                                    using (Pen outlinePen = new Pen(Color.FromArgb(180, 35, 25, 15), 2.8f) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+                                    gp.AddString("Therefore, it is forbidden to\ntouch the Triforce carelessly.", ff.FontFamily, 0, 34f, new PointF(180f, 110f), StringFormat.GenericTypographic);
+                                    using (Pen outlinePen = new Pen(Color.FromArgb(180, 35, 25, 15), 3.2f) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
                                         gg.DrawPath(outlinePen, gp);
                                     using (SolidBrush fillBr = new SolidBrush(Color.FromArgb(248, 248, 248)))
                                         gg.FillPath(fillBr, gp);
                                 }
                             }
+                            System.Diagnostics.Stopwatch swFast = System.Diagnostics.Stopwatch.StartNew();
                             string glowOcr = eng.RecognizeBitmap(glowBmp, "en", out usedOnline, out err);
+                            long ocrElapsed = swFast.ElapsedMilliseconds;
                             string glowNorm = TranslationEngine.NormalizeText(glowOcr, "en", true);
-                            LogTest("[OCR-FLOATING-CUTSCENE] '" + glowNorm + "'");
+                            string glowTr = eng.TranslateText(glowNorm, "en", "id", "google", "", true, out prov, out terr);
+                            swFast.Stop();
+                            LogTest("[OCR-FLOATING-CUTSCENE] (" + ocrElapsed + "ms OCR, " + swFast.ElapsedMilliseconds + "ms Total) '" + glowNorm + "' -> '" + glowTr + "'");
                             if (string.IsNullOrEmpty(glowNorm) || !glowNorm.ToLowerInvariant().Contains("forbidden") || !glowNorm.ToLowerInvariant().Contains("triforce"))
                             {
                                 LogTest("[FAIL] Floating cutscene subtitle OCR failed: " + glowNorm);

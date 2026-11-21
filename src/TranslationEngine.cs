@@ -39,6 +39,7 @@ namespace TranslatorLive
         private volatile bool _running;
         private volatile bool _pausedForEdit;
         private volatile bool _forceScan;
+        private volatile bool _fastPollNext;
 
         private readonly Dictionary<int, byte[]> _prevSigs = new Dictionary<int, byte[]>();
         private readonly Dictionary<int, string> _lastOcrByArea = new Dictionary<int, string>();
@@ -78,8 +79,8 @@ namespace TranslatorLive
             {
                 try
                 {
-                    HttpRequestFast("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1200);
-                    HttpRequestFast("https://translate.google.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1200);
+                    HttpRequestFast("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1000);
+                    HttpRequestFast("https://translate.google.co.id/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1000);
                 }
                 catch { }
             });
@@ -240,11 +241,13 @@ namespace TranslatorLive
                     ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, naturalTone, detectSpeaker, waitStable, mergeLines, enhanceOcr, autoHideSec, forced);
                 }
 
+                int waitTarget = _fastPollNext ? 25 : intervalMs;
+                _fastPollNext = false;
                 int slept = 0;
-                while (slept < intervalMs && !_stop && _running && !_forceScan && !_pausedForEdit)
+                while (slept < waitTarget && !_stop && _running && !_forceScan && !_pausedForEdit)
                 {
-                    Thread.Sleep(20);
-                    slept += 20;
+                    Thread.Sleep(15);
+                    slept += 15;
                 }
             }
         }
@@ -263,95 +266,109 @@ namespace TranslatorLive
                 byte[] sig = ComputeSignature(frame);
                 byte[] prevSig;
                 bool hasPrev = _prevSigs.TryGetValue(area.Id, out prevSig);
+                int pendingCount = 0;
+                _pendingCountByArea.TryGetValue(area.Id, out pendingCount);
+                string pendingText = "";
+                _pendingOcrByArea.TryGetValue(area.Id, out pendingText);
 
+                bool screenStatic = false;
                 if (!forced && hasPrev)
                 {
                     float diff = ComputeDiffPercent(sig, prevSig);
                     if (diff < 1.8f)
                     {
-                        CheckIdleTimeout(area.Id, autoHideSec);
-                        return;
+                        // CRITICAL FIX: If typewriter debouncer was waiting for typing to stop,
+                        // diff < 1.8f proves typing has finished! Flush pendingText immediately without re-running OCR!
+                        if (pendingCount > 0 && !string.IsNullOrEmpty(pendingText))
+                        {
+                            screenStatic = true;
+                        }
+                        else
+                        {
+                            CheckIdleTimeout(area.Id, autoHideSec);
+                            return;
+                        }
                     }
                 }
 
                 _prevSigs[area.Id] = sig;
 
-                bool usedOnline, detectedChoiceLayout;
-                string ocrError;
-                string rawText = RecognizeBitmap(frame, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out ocrError);
+                bool treatAsChoice = (area.Mode == AreaTextMode.Choice);
+                string cleanText;
+                int newOcrScore;
 
-                if (!string.IsNullOrEmpty(ocrError))
+                if (screenStatic)
                 {
-                    RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, ocrError, true);
-                    return;
+                    // Screen stopped changing after typewriter expansion: use already-recognized pendingText in 0ms!
+                    cleanText = pendingText;
+                    newOcrScore = ScoreOcrQuality(cleanText, srcLang);
+                    _pendingCountByArea[area.Id] = 0;
                 }
-
-                bool treatAsChoice = (area.Mode == AreaTextMode.Choice) || detectedChoiceLayout;
-                string cleanText = treatAsChoice
-                    ? NormalizeChoices(rawText)
-                    : NormalizeText(rawText, srcLang, mergeLines);
-
-                if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
+                else
                 {
-                    string oldT;
-                    if (_lastTransByArea.TryGetValue(area.Id, out oldT) && !string.IsNullOrEmpty(oldT))
+                    bool usedOnline, detectedChoiceLayout;
+                    string ocrError;
+                    string rawText = RecognizeBitmap(frame, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out ocrError);
+
+                    if (!string.IsNullOrEmpty(ocrError))
                     {
-                        _lastOcrByArea[area.Id] = "";
-                        _lastOcrScoreByArea[area.Id] = 0;
-                        _lastTransByArea[area.Id] = "";
-                        _pendingOcrByArea[area.Id] = "";
-                        _pendingCountByArea[area.Id] = 0;
-                        _idleHidden[area.Id] = true;
-                        RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, "Kosong", false);
-                    }
-                    return;
-                }
-
-                int newOcrScore = ScoreOcrQuality(cleanText, srcLang);
-                if (!treatAsChoice && newOcrScore < 52)
-                {
-                    // Ignore low-confidence video transition / fade-out noise so screen never flashes garbage
-                    CheckIdleTimeout(area.Id, autoHideSec);
-                    return;
-                }
-
-                // True Typewriter / Streaming Video Subtitle Debouncer:
-                // Never translate a sentence 5 times while it is actively typing out letter-by-letter!
-                if (!forced && !treatAsChoice)
-                {
-                    bool isTerminal = EndsWithTerminalPunctuation(cleanText);
-                    string pendingText;
-                    _pendingOcrByArea.TryGetValue(area.Id, out pendingText);
-                    int pendingCount;
-                    _pendingCountByArea.TryGetValue(area.Id, out pendingCount);
-
-                    if (!string.IsNullOrEmpty(pendingText))
-                    {
-                        string coreClean = NormalizeCoreText(cleanText);
-                        string corePend = NormalizeCoreText(pendingText);
-
-                        // Case A: Text is actively expanding (typewriter animation in progress)
-                        bool isExpanding = coreClean.Length > corePend.Length &&
-                            (coreClean.StartsWith(corePend, StringComparison.OrdinalIgnoreCase) ||
-                             (corePend.Length >= 5 && ComputeSimilarity(coreClean.Substring(0, corePend.Length), corePend) >= 0.75f));
-
-                        if (isExpanding && !isTerminal && pendingCount < 9)
-                        {
-                            _pendingOcrByArea[area.Id] = cleanText;
-                            _pendingCountByArea[area.Id] = pendingCount + 1;
-                            return; // Wait for typing animation to complete!
-                        }
-                    }
-                    else if (!isTerminal && cleanText.Length < 34)
-                    {
-                        // Brand-new short fragment without terminal punctuation: wait 1 quick tick to see if it's typing out
-                        _pendingOcrByArea[area.Id] = cleanText;
-                        _pendingCountByArea[area.Id] = 1;
+                        RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, ocrError, true);
                         return;
                     }
 
-                    _pendingOcrByArea[area.Id] = cleanText;
-                    _pendingCountByArea[area.Id] = 0;
+                    treatAsChoice = (area.Mode == AreaTextMode.Choice) || detectedChoiceLayout;
+                    cleanText = treatAsChoice
+                        ? NormalizeChoices(rawText)
+                        : NormalizeText(rawText, srcLang, mergeLines);
+
+                    if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
+                    {
+                        string oldT;
+                        if (_lastTransByArea.TryGetValue(area.Id, out oldT) && !string.IsNullOrEmpty(oldT))
+                        {
+                            _lastOcrByArea[area.Id] = "";
+                            _lastOcrScoreByArea[area.Id] = 0;
+                            _lastTransByArea[area.Id] = "";
+                            _pendingOcrByArea[area.Id] = "";
+                            _pendingCountByArea[area.Id] = 0;
+                            _idleHidden[area.Id] = true;
+                            RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, "Kosong", false);
+                        }
+                        return;
+                    }
+
+                    newOcrScore = ScoreOcrQuality(cleanText, srcLang);
+                    if (!treatAsChoice && newOcrScore < 52)
+                    {
+                        CheckIdleTimeout(area.Id, autoHideSec);
+                        return;
+                    }
+
+                    // Fast Streaming Typewriter Debouncer (Zero delay on instant video subtitles; 25ms micro-poll only while actively typing):
+                    if (!forced && !treatAsChoice)
+                    {
+                        bool isTerminal = EndsWithTerminalPunctuation(cleanText);
+                        if (!string.IsNullOrEmpty(pendingText))
+                        {
+                            string coreClean = NormalizeCoreText(cleanText);
+                            string corePend = NormalizeCoreText(pendingText);
+
+                            bool isExpanding = coreClean.Length > corePend.Length &&
+                                (coreClean.StartsWith(corePend, StringComparison.OrdinalIgnoreCase) ||
+                                 (corePend.Length >= 4 && ComputeSimilarity(coreClean.Substring(0, corePend.Length), corePend) >= 0.75f));
+
+                            if (isExpanding && !isTerminal && pendingCount < 10)
+                            {
+                                _pendingOcrByArea[area.Id] = cleanText;
+                                _pendingCountByArea[area.Id] = pendingCount + 1;
+                                _fastPollNext = true; // Re-poll in 25ms so there is no lag when typing finishes!
+                                return;
+                            }
+                        }
+
+                        _pendingOcrByArea[area.Id] = cleanText;
+                        _pendingCountByArea[area.Id] = 0;
+                    }
                 }
 
                 string prevOcr, prevTrans;
@@ -1010,8 +1027,20 @@ namespace TranslatorLive
 
         private static TR AwaitWinRt<TR>(IAsyncOperation<TR> op)
         {
-            int tries = 0;
-            while (op.Status == AsyncStatus.Started && tries < 2500) { Thread.Sleep(1); tries++; }
+            if (op.Status == AsyncStatus.Completed) return op.GetResults();
+            using (ManualResetEventSlim ev = new ManualResetEventSlim(false))
+            {
+                try
+                {
+                    op.Completed = delegate { try { ev.Set(); } catch { } };
+                    if (op.Status == AsyncStatus.Started) ev.Wait(2200);
+                }
+                catch
+                {
+                    int tries = 0;
+                    while (op.Status == AsyncStatus.Started && tries < 2200) { Thread.Sleep(1); tries++; }
+                }
+            }
             if (op.Status != AsyncStatus.Completed) throw new Exception("WinRT OCR status: " + op.Status);
             return op.GetResults();
         }
@@ -1046,12 +1075,15 @@ namespace TranslatorLive
                 return RecognizeOnlineOcrSpace(sourceBmp, srcLang, out error);
             }
 
-            // Pass 1: Natural High-Resolution Bicubic Upscaling (preserves full RGB channels, anti-aliasing, and white floating subtitles over bright cutscenes)
-            Bitmap scaledBmp = UpscaleNaturalForOcr(sourceBmp);
+            // Pass 1 (Ultra-Fast Native / Fast-Upscale Pass — ~22ms on 1437x345!):
+            // Only upscale on Pass 1 if the capture box itself is tiny (< 115px tall or < 420px wide).
+            Bitmap pass1Bmp = (sourceBmp.Height < 115 || sourceBmp.Width < 420)
+                ? UpscaleNaturalForOcr(sourceBmp)
+                : sourceBmp;
             try
             {
                 bool choice1 = false;
-                string text1 = RunWinRtOcrSinglePass(eng, scaledBmp, srcLang, out choice1);
+                string text1 = RunWinRtOcrSinglePass(eng, pass1Bmp, srcLang, out choice1);
                 if (!enhanceOcr || string.IsNullOrWhiteSpace(text1))
                 {
                     detectedChoiceLayout = choice1;
@@ -1059,27 +1091,36 @@ namespace TranslatorLive
                 }
 
                 int score1 = ScoreOcrQuality(text1, srcLang);
-                // If Natural Super-Resolution already produced clean, high-confidence text (>= 86), return immediately (~12ms total!)
-                if (score1 >= 86)
+                // If Pass 1 already produced clean, high-confidence text (>= 88), return immediately (~22ms total!)
+                if (score1 >= 88)
                 {
                     detectedChoiceLayout = choice1;
                     return text1;
                 }
 
-                // Pass 2: Smooth Achromatic Saturation-Suppressed Grayscale (1ms, zero hard threshold, zero 3D sketch lines, suppresses bright yellow/orange/colored glare)
-                using (Bitmap achromBmp = ToSmoothAchromaticGrayscale(scaledBmp))
+                // Pass 2 (Super-Resolution + Smooth Achromatic Glare Suppression Fallback for tiny fonts or blinding glare):
+                Bitmap scaledForPass2 = (pass1Bmp == sourceBmp) ? UpscaleNaturalForOcr(sourceBmp) : pass1Bmp;
+                try
                 {
-                    bool choice2 = false;
-                    string text2 = RunWinRtOcrSinglePass(eng, achromBmp, srcLang, out choice2);
-                    int score2 = ScoreOcrQuality(text2, srcLang);
-
-                    if (score2 > score1 && !string.IsNullOrWhiteSpace(text2))
+                    using (Bitmap achromBmp = ToSmoothAchromaticGrayscale(scaledForPass2))
                     {
-                        detectedChoiceLayout = choice2;
-                        return text2;
+                        bool choice2 = false;
+                        string text2 = RunWinRtOcrSinglePass(eng, achromBmp, srcLang, out choice2);
+                        int score2 = ScoreOcrQuality(text2, srcLang);
+
+                        if (score2 > score1 && !string.IsNullOrWhiteSpace(text2))
+                        {
+                            detectedChoiceLayout = choice2;
+                            return text2;
+                        }
+                        detectedChoiceLayout = choice1;
+                        return text1;
                     }
-                    detectedChoiceLayout = choice1;
-                    return text1;
+                }
+                finally
+                {
+                    if (scaledForPass2 != null && scaledForPass2 != sourceBmp && scaledForPass2 != pass1Bmp)
+                        scaledForPass2.Dispose();
                 }
             }
             catch (Exception ex)
@@ -1089,8 +1130,8 @@ namespace TranslatorLive
             }
             finally
             {
-                if (scaledBmp != null && scaledBmp != sourceBmp)
-                    scaledBmp.Dispose();
+                if (pass1Bmp != null && pass1Bmp != sourceBmp)
+                    pass1Bmp.Dispose();
             }
         }
 
@@ -1177,11 +1218,10 @@ namespace TranslatorLive
         {
             if (bmp == null || bmp.Width <= 0 || bmp.Height <= 0) return bmp;
 
-            // Target optimal character height for WinRT OCR (approx 38-64px)
             float scale = 1.0f;
-            if (bmp.Height < 180) scale = 2.5f;
-            else if (bmp.Height < 400 && bmp.Width * 2 <= 3400) scale = 2.0f;
-            else if (bmp.Height < 600 && bmp.Width * 1.5f <= 3400) scale = 1.5f;
+            if (bmp.Height < 140) scale = 2.0f;
+            else if (bmp.Height < 260 && bmp.Width * 1.6f <= 2600) scale = 1.6f;
+            else if (bmp.Height < 420 && bmp.Width * 1.35f <= 2400) scale = 1.35f;
 
             if (scale <= 1.01f) return bmp;
 
@@ -1190,9 +1230,8 @@ namespace TranslatorLive
             Bitmap up = new Bitmap(nw, nh, PixelFormat.Format32bppArgb);
             using (Graphics g = Graphics.FromImage(up))
             {
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.InterpolationMode = InterpolationMode.Bilinear;
+                g.PixelOffsetMode = PixelOffsetMode.HighSpeed;
                 g.DrawImage(bmp, 0, 0, nw, nh);
             }
             return up;
@@ -1775,9 +1814,9 @@ namespace TranslatorLive
 
         private static readonly string[] GoogleGtxHosts = new string[]
         {
+            "https://translate.google.co.id/translate_a/single",
             "https://translate.googleapis.com/translate_a/single",
-            "https://translate.google.com/translate_a/single",
-            "https://translate.google.co.id/translate_a/single"
+            "https://translate.google.com/translate_a/single"
         };
 
         private static string CallGoogleGtx(string text, string srcLang, string tgtLang, out string error)
