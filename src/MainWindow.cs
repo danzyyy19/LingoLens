@@ -1447,17 +1447,36 @@ namespace TranslatorLive
                 Theme.FillRR(g, ovBox, st.Corner, Color.FromArgb(a, st.BgColor.R, st.BgColor.G, st.BgColor.B));
                 Theme.DrawRR(g, ovBox, st.Corner, Color.FromArgb(Math.Min(50, a / 3), 255, 255, 255), 1f);
             }
+            float topPad = S(8f);
+            if (_cfg.DetectSpeaker && (_styleTargetAreaId == 0 || (_cfg.FindArea(_styleTargetAreaId) != null && _cfg.FindArea(_styleTargetAreaId).Mode == AreaTextMode.Dialog)))
+            {
+                using (Font fs = Theme.UiFont(Math.Max(11f, Math.Min(14f, st.FontSize * 0.56f)), true))
+                {
+                    string spkSample = "Saria";
+                    SizeF ssz = TextRenderer.MeasureText(spkSample, fs);
+                    float bw = Math.Min(ovBox.Width - st.Padding * 2f, ssz.Width + S(18f));
+                    float bh = S(22f);
+                    float bx = st.Align == 1 ? Math.Max(st.Padding, (ovBox.Width - bw) * 0.5f) : (st.Align == 2 ? Math.Max(st.Padding, ovBox.Width - st.Padding - bw) : st.Padding);
+                    RectangleF badge = new RectangleF(ovBox.X + bx, ovBox.Y + topPad, bw, bh);
+                    Color spkCol = Color.FromArgb(245, st.SpeakerColor.R, st.SpeakerColor.G, st.SpeakerColor.B);
+                    Theme.FillRR(g, badge, bh * 0.5f, spkCol);
+                    using (StringFormat sfB = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                    using (SolidBrush wBr = new SolidBrush(Color.White))
+                        g.DrawString(spkSample, fs, wBr, badge, sfB);
+                    topPad += bh + S(4f);
+                }
+            }
             string samplePrev = (_styleTargetAreaId > 0 && _cfg.FindArea(_styleTargetAreaId) != null && _cfg.FindArea(_styleTargetAreaId).Mode == AreaTextMode.Choice)
                 ? "• Aku belum yakin.\n• Aku ikut!"
                 : "Kamu harus cepat. Susul aku nanti!";
-            OverlayPane.DrawOverlayText(g, samplePrev, SR(ovBox.X + st.Padding, ovBox.Y + 8f, ovBox.Width - st.Padding * 2f, ovBox.Height - 16f), st);
+            OverlayPane.DrawOverlayText(g, samplePrev, SR(ovBox.X + st.Padding, ovBox.Y + topPad, ovBox.Width - st.Padding * 2f, ovBox.Height - topPad - S(8f)), st);
 
             cy += S(190f);
 
             float colGap = S(14f);
             bool twoCol = (w >= S(620f));
             float colW = twoCol ? (w - colGap) * 0.5f : w;
-            float colH = S(326f);
+            float colH = S(366f);
 
             RectangleF left = SR(x, cy, colW, colH);
             Theme.DrawCard(g, pal, left, S(16f));
@@ -1514,10 +1533,12 @@ namespace TranslatorLive
             }
             ry += S(42f);
 
-            float c3 = (rw2 - S(14f)) / 3f;
-            DrawColorBtn(g, pal, "PICK_TEXT", SR(rx, ry, c3, S(34f)), T("Teks", "Text"), st.TextColor, fCap);
-            DrawColorBtn(g, pal, "PICK_BG", SR(rx + c3 + S(7f), ry, c3, S(34f)), T("Latar", "Back"), st.BgColor, fCap);
-            DrawColorBtn(g, pal, "PICK_OUT", SR(rx + (c3 + S(7f)) * 2f, ry, c3, S(34f)), "Outline", st.OutlineColor, fCap);
+            float c2 = (rw2 - S(8f)) * 0.5f;
+            DrawColorBtn(g, pal, "PICK_TEXT", SR(rx, ry, c2, S(34f)), T("Warna Teks", "Text Color"), st.TextColor, fCap);
+            DrawColorBtn(g, pal, "PICK_BG", SR(rx + c2 + S(8f), ry, c2, S(34f)), T("Latar Kotak", "Background"), st.BgColor, fCap);
+            ry += S(40f);
+            DrawColorBtn(g, pal, "PICK_OUT", SR(rx, ry, c2, S(34f)), T("Garis Tepi", "Outline"), st.OutlineColor, fCap);
+            DrawColorBtn(g, pal, "PICK_SPEAKER", SR(rx + c2 + S(8f), ry, c2, S(34f)), T("Badge Aktor", "Speaker Badge"), st.SpeakerColor, fCap);
 
             cy += colH + S(16f);
             return cy - y;
@@ -2222,6 +2243,9 @@ namespace TranslatorLive
                 case "PICK_OUT":
                     return T("Pilih warna garis tepi (outline) teks", "Pick text outline border color");
 
+                case "PICK_SPEAKER":
+                    return T("Pilih warna badge nama aktor/pembicara", "Pick speaker/actor badge color");
+
                 case "SL_SIZE":
                     return T("Geser untuk mengatur ukuran huruf teks terjemahan", "Drag to adjust font size");
 
@@ -2386,14 +2410,15 @@ namespace TranslatorLive
         private void PickColor(int which)
         {
             OverlayStyle st = ActiveStyle;
-            Color cur = which == 0 ? st.TextColor : (which == 1 ? st.BgColor : st.OutlineColor);
+            Color cur = which == 0 ? st.TextColor : (which == 1 ? st.BgColor : (which == 2 ? st.OutlineColor : st.SpeakerColor));
             using (ColorDialog cd = new ColorDialog { Color = cur, FullOpen = true })
             {
                 if (cd.ShowDialog(this) == DialogResult.OK)
                 {
                     if (which == 0) st.TextColor = cd.Color;
                     else if (which == 1) st.BgColor = cd.Color;
-                    else st.OutlineColor = cd.Color;
+                    else if (which == 2) st.OutlineColor = cd.Color;
+                    else st.SpeakerColor = cd.Color;
                     if (_styleTargetAreaId > 0) st.UseCustom = true;
                     _cfg.Save();
                     _overlay.UpdateTexts();
@@ -2547,6 +2572,7 @@ namespace TranslatorLive
                 case "PICK_TEXT": PickColor(0); break;
                 case "PICK_BG": PickColor(1); break;
                 case "PICK_OUT": PickColor(2); break;
+                case "PICK_SPEAKER": PickColor(3); break;
 
                 case "SYS_NATURAL": _cfg.NaturalTone = !_cfg.NaturalTone; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_SPEAKER": _cfg.DetectSpeaker = !_cfg.DetectSpeaker; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;

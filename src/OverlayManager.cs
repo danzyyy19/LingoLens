@@ -490,7 +490,8 @@ namespace TranslatorLive
                                     float bh = 22f;
                                     float bx = st.Align == 1 ? Math.Max(pad, (Width - bw) * 0.5f) : (st.Align == 2 ? Math.Max(pad, Width - pad - bw) : pad);
                                     RectangleF badge = new RectangleF(bx, topPad, bw, bh);
-                                    Theme.FillRR(g, badge, 11f, Color.FromArgb(240, 16, 185, 129));
+                                    Color spkCol = Color.FromArgb(245, st.SpeakerColor.R, st.SpeakerColor.G, st.SpeakerColor.B);
+                                    Theme.FillRR(g, badge, 11f, spkCol);
                                     using (StringFormat sfB = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                                     using (SolidBrush wBr = new SolidBrush(Color.White))
                                         g.DrawString(SpeakerName, fs, wBr, badge, sfB);

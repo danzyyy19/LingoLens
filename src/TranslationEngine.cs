@@ -642,9 +642,20 @@ namespace TranslatorLive
             // Gaming entities & sacred titles (Zelda, Elden Ring, RPGs)
             s = Regex.Replace(s, @"\b[Tt]he\s+Great\s+Deku\s+Tree\b", "The Great Deku Tree");
             s = Regex.Replace(s, @"\bGreat\s+Deku\s+Tree\b", "Great Deku Tree");
+            s = Regex.Replace(s, @"\bDeku\s+Nuts?\b", "Deku Nut");
+            s = Regex.Replace(s, @"\bDeku\s+Sticks?\b", "Deku Stick");
+            s = Regex.Replace(s, @"\bDeku\s+Scrubs?\b", "Deku Scrub");
+            s = Regex.Replace(s, @"\bDeku\s+Shield\b", "Deku Shield");
+            s = Regex.Replace(s, @"\bDeku\s+Baba\b", "Deku Baba");
+            s = Regex.Replace(s, @"\bDeku\s+Sprout\b", "Deku Sprout");
+            s = Regex.Replace(s, @"\bDeku\s+Mask\b", "Deku Mask");
             s = Regex.Replace(s, @"\bMaster\s+Sword\b", "Master Sword");
+            s = Regex.Replace(s, @"\bKokiri\s+Sword\b", "Kokiri Sword");
+            s = Regex.Replace(s, @"\bHylian\s+Shield\b", "Hylian Shield");
+            s = Regex.Replace(s, @"\bMirror\s+Shield\b", "Mirror Shield");
             s = Regex.Replace(s, @"\bGreat\s+Fairy\b", "Great Fairy");
             s = Regex.Replace(s, @"\bGreat\s+Plateau\b", "Great Plateau");
+            s = Regex.Replace(s, @"\bOcarina\s+of\s+Time\b", "Ocarina of Time");
 
             return s;
         }
@@ -658,6 +669,12 @@ namespace TranslatorLive
             // 1. Fix literal idiom leftovers (Game Idioms & robotic artifacts)
             s = Regex.Replace(s, @"\b[Pp]ohon\s+[Dd]eku\s+(?:yang\s+)?baik\b", "Pohon Deku Agung", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Pp]ohon\s+[Dd]eku\s+hebat\b", "Pohon Deku Agung", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:[Kk]acang-[Kk]acang|[Bb]iji-[Bb]iji)\s+[Dd]eku\b", "Deku Nuts", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:[Kk]acang|[Bb]iji)\s+[Dd]eku\b", "Deku Nut", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Tt]ongkat\s+[Dd]eku\b", "Deku Stick", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Pp]erisa?i\s+[Dd]eku\b", "Deku Shield", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Pp]edang\s+[Kk]okiri\b", "Pedang Kokiri", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b[Hh]utan\s+[Kk]okiri\b", "Hutan Kokiri", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Pp]edang\s+(?:tuan|guru|ahli)\b", "Master Sword", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Pp]eri\s+(?:yang\s+)?baik\b", "Peri Agung", RegexOptions.IgnoreCase);
             s = Regex.Replace(s, @"\b[Pp]eri\s+hebat\b", "Peri Agung", RegexOptions.IgnoreCase);

@@ -29,6 +29,7 @@ namespace TranslatorLive
         public int Padding = 14;
         public bool Shadow = true;
         public bool AutoFit = true;
+        public Color SpeakerColor = Color.FromArgb(16, 185, 129); // Emerald green default
 
         public OverlayStyle Clone()
         {
@@ -197,7 +198,7 @@ namespace TranslatorLive
         {
             return (s.UseCustom ? 1 : 0) + ";" + s.Font.Replace(';', ' ') + ";" + s.FontSize + ";" + (s.Bold ? 1 : 0) + ";" +
                    s.Align + ";" + Hex(s.TextColor) + ";" + Hex(s.BgColor) + ";" + Hex(s.OutlineColor) + ";" +
-                   s.BgOpacity + ";" + s.Outline + ";" + s.Corner + ";" + s.Padding + ";" + (s.Shadow ? 1 : 0) + ";" + (s.AutoFit ? 1 : 0);
+                   s.BgOpacity + ";" + s.Outline + ";" + s.Corner + ";" + s.Padding + ";" + (s.Shadow ? 1 : 0) + ";" + (s.AutoFit ? 1 : 0) + ";" + Hex(s.SpeakerColor);
         }
 
         static OverlayStyle ParseStyle(string raw, OverlayStyle fallback)
@@ -222,6 +223,7 @@ namespace TranslatorLive
                 if (int.TryParse(p[11], out n)) s.Padding = Math.Max(4, Math.Min(40, n));
                 s.Shadow = p[12] != "0";
                 s.AutoFit = p[13] != "0";
+                if (p.Length >= 15) s.SpeakerColor = ParseColor(p[14], s.SpeakerColor);
             }
             catch { }
             return s;
