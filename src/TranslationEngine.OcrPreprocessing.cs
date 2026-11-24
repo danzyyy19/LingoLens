@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -572,10 +572,11 @@ namespace TranslatorLive
                 }
             }
 
-            // PASS 4 (HOLLOW THIN-BORDER WHITE-ON-WHITE ENHANCER):
-            // Fixes white font + thin black outline over a pure white / very bright game background!
-            // Runs on bright backgrounds whenever Pass 1-3 struggled (< 90) or returned empty (0ms overhead when Pass 1-3 already nailed it!).
-            if (hasBrightBg && (bestScore < 90 || string.IsNullOrWhiteSpace(bestClean)))
+            // PASS 4 (HOLLOW THIN-BORDER SAME-COLOR ENHANCER):
+            // Fixes same-color font + dark outline/shadow over matching background (white-on-white, yellow-on-yellow,
+            // blue-on-blue, red-on-red, green-on-green, gray-on-gray)!
+            // Only reached when Fast-Path 1 & 2 did not already agree on a pristine reading (0ms overhead on normal subtitles!).
+            if (bestScore < 95 || bestClean.Length < 28 || string.IsNullOrWhiteSpace(bestClean))
             {
                 int padW4, padH4;
                 byte[] fillBuf = ApplyThinDarkBorderFillEnhancer(upscaledRaw, nw, nh, out padW4, out padH4);
@@ -962,7 +963,14 @@ namespace TranslatorLive
             for (int i = 0; i < total; i++)
             {
                 int off = i << 2;
-                lum[i] = (byte)((77 * srcBgra[off + 2] + 150 * srcBgra[off + 1] + 29 * srcBgra[off]) >> 8);
+                byte b = srcBgra[off];
+                byte g = srcBgra[off + 1];
+                byte r = srcBgra[off + 2];
+                int y = (77 * r + 150 * g + 29 * b) >> 8;
+                int mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                // Blend luminance with max-channel (HSV Value) so saturated same-color scenes
+                // (yellow-on-yellow, blue-on-blue, red-on-red, green-on-green) keep strong contrast against dark borders!
+                lum[i] = (byte)((y + mx) >> 1);
             }
 
             // Fast O(W*H) separable local background luminance estimate (radius rBg = 12..16px)
@@ -1002,8 +1010,8 @@ namespace TranslatorLive
                     int idx = y * w + x;
                     int localBg = sum / win;
                     int l = lum[idx];
-                    // Catch both crisp black borders (l < 115) and anti-aliased thin dark outlines on white/bright bg
-                    if ((localBg >= 165 && (localBg - l) >= 28) || (localBg >= 135 && l < 115 && (localBg - l) >= 38))
+                    // Catch both crisp black borders and anti-aliased thin dark outlines/shadows on any matching-color background
+                    if ((localBg >= 165 && (localBg - l) >= 24) || (localBg >= 55 && l < 145 && (localBg - l) >= 16))
                     {
                         darkMask[idx] = 1;
                     }
@@ -1013,79 +1021,119 @@ namespace TranslatorLive
                 }
             }
 
-            // Morphological Closing: Dilate(rDil) -> Erode(rEro) fills hollow white interior between thin black borders!
-            // Using rEro == rDil (exact closing) preserves original outer letter thickness & punctuation ('.', 'i') cleanly.
-            int rDil = (h >= 180) ? 3 : 2;
-            int rEro = rDil;
+            // Exact Topological 3-Phase BFS Outline Filler in O(W*H) (~2ms):
+            //   label 1 = Exterior background & kerning gaps (0 crossings) -> WHITE (never merges adjacent letters!)
+            //   label 2 = Outer dark outline touching exterior             -> BLACK
+            //   label 3 = Hollow stroke interior touching outer outline    -> BLACK (fills any stroke width!)
+            //   label 0 & darkMask==1 = Inner dark outline (inside O,e,a)  -> BLACK
+            //   label 0 & darkMask==0 = Letter counters/holes (O,e,a,d,g)  -> WHITE (never fills letter holes!)
+            byte[] label = new byte[total];
+            int[] queue = new int[total];
+            int qHead = 0, qTail = 0;
 
-            // 1. Separable 1D Dilation
-            byte[] dilH = new byte[total];
-            for (int y = 0; y < h; y++)
-            {
-                int row = y * w;
-                int run = 0;
-                for (int x = 0; x < Math.Min(w, rDil + 1); x++) run += darkMask[row + x];
-                for (int x = 0; x < w; x++)
-                {
-                    if (run > 0) dilH[row + x] = 1;
-                    int left = x - rDil;
-                    int right = x + rDil + 1;
-                    if (left >= 0) run -= darkMask[row + left];
-                    if (right < w) run += darkMask[row + right];
-                }
-            }
-            byte[] dil = new byte[total];
+            // Phase 1: Exterior BFS from ROI borders on non-dark pixels (label = 1)
             for (int x = 0; x < w; x++)
             {
-                int run = 0;
-                for (int y = 0; y < Math.Min(h, rDil + 1); y++) run += dilH[y * w + x];
-                for (int y = 0; y < h; y++)
-                {
-                    if (run > 0) dil[y * w + x] = 1;
-                    int top = y - rDil;
-                    int bot = y + rDil + 1;
-                    if (top >= 0) run -= dilH[top * w + x];
-                    if (bot < h) run += dilH[bot * w + x];
-                }
+                int topIdx = x;
+                if (darkMask[topIdx] == 0 && label[topIdx] == 0) { label[topIdx] = 1; queue[qTail++] = topIdx; }
+                int botIdx = (h - 1) * w + x;
+                if (darkMask[botIdx] == 0 && label[botIdx] == 0) { label[botIdx] = 1; queue[qTail++] = botIdx; }
+            }
+            for (int y = 1; y < h - 1; y++)
+            {
+                int leftIdx = y * w;
+                if (darkMask[leftIdx] == 0 && label[leftIdx] == 0) { label[leftIdx] = 1; queue[qTail++] = leftIdx; }
+                int rightIdx = leftIdx + w - 1;
+                if (darkMask[rightIdx] == 0 && label[rightIdx] == 0) { label[rightIdx] = 1; queue[qTail++] = rightIdx; }
+            }
+            while (qHead < qTail)
+            {
+                int cur = queue[qHead++];
+                int cx = cur % w;
+                int cy = cur / w;
+                if (cx > 0) { int n = cur - 1; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 1; queue[qTail++] = n; } }
+                if (cx + 1 < w) { int n = cur + 1; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 1; queue[qTail++] = n; } }
+                if (cy > 0) { int n = cur - w; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 1; queue[qTail++] = n; } }
+                if (cy + 1 < h) { int n = cur + w; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 1; queue[qTail++] = n; } }
             }
 
-            // 2. Separable 1D Erosion (restores outer silhouette while keeping filled stroke interiors solid!)
-            byte[] eroH = new byte[total];
+            // Phase 2: Outer dark outline BFS (dark pixels touching exterior -> label = 2)
+            qHead = 0; qTail = 0;
             for (int y = 0; y < h; y++)
             {
                 int row = y * w;
-                int zeros = 0;
-                for (int k = -rEro; k <= rEro; k++)
-                {
-                    int cx = k < 0 ? 0 : (k >= w ? w - 1 : k);
-                    if (dil[row + cx] == 0) zeros++;
-                }
                 for (int x = 0; x < w; x++)
                 {
-                    if (zeros == 0) eroH[row + x] = 1;
-                    int xOut = x - rEro; if (xOut < 0) xOut = 0;
-                    int xIn = x + rEro + 1; if (xIn >= w) xIn = w - 1;
-                    if (dil[row + xOut] == 0) zeros--;
-                    if (dil[row + xIn] == 0) zeros++;
+                    int idx = row + x;
+                    if (darkMask[idx] == 0) continue;
+                    if ((x > 0 && label[idx - 1] == 1) || (x + 1 < w && label[idx + 1] == 1) ||
+                        (y > 0 && label[idx - w] == 1) || (y + 1 < h && label[idx + w] == 1))
+                    {
+                        label[idx] = 2;
+                        queue[qTail++] = idx;
+                    }
                 }
             }
+            while (qHead < qTail)
+            {
+                int cur = queue[qHead++];
+                int cx = cur % w;
+                int cy = cur / w;
+                if (cx > 0) { int n = cur - 1; if (darkMask[n] != 0 && label[n] == 0) { label[n] = 2; queue[qTail++] = n; } }
+                if (cx + 1 < w) { int n = cur + 1; if (darkMask[n] != 0 && label[n] == 0) { label[n] = 2; queue[qTail++] = n; } }
+                if (cy > 0) { int n = cur - w; if (darkMask[n] != 0 && label[n] == 0) { label[n] = 2; queue[qTail++] = n; } }
+                if (cy + 1 < h) { int n = cur + w; if (darkMask[n] != 0 && label[n] == 0) { label[n] = 2; queue[qTail++] = n; } }
+            }
+
+            // Phase 3: Hollow stroke interior BFS (non-dark pixels touching outer outline -> label = 3)
+            qHead = 0; qTail = 0;
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    int idx = row + x;
+                    if (darkMask[idx] != 0 || label[idx] != 0) continue;
+                    if ((x > 0 && label[idx - 1] == 2) || (x + 1 < w && label[idx + 1] == 2) ||
+                        (y > 0 && label[idx - w] == 2) || (y + 1 < h && label[idx + w] == 2))
+                    {
+                        label[idx] = 3;
+                        queue[qTail++] = idx;
+                    }
+                }
+            }
+            while (qHead < qTail)
+            {
+                int cur = queue[qHead++];
+                int cx = cur % w;
+                int cy = cur / w;
+                if (cx > 0) { int n = cur - 1; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 3; queue[qTail++] = n; } }
+                if (cx + 1 < w) { int n = cur + 1; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 3; queue[qTail++] = n; } }
+                if (cy > 0) { int n = cur - w; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 3; queue[qTail++] = n; } }
+                if (cy + 1 < h) { int n = cur + w; if (darkMask[n] == 0 && label[n] == 0) { label[n] = 3; queue[qTail++] = n; } }
+            }
+
+            int interiorCount = 0, darkTotal = 0;
+            for (int i = 0; i < total; i++)
+            {
+                if (label[i] == 3) interiorCount++;
+                if (darkMask[i] != 0) darkTotal++;
+            }
+
+            // If a closed dark outline enclosed genuine glyph interiors (label == 3), render ONLY the exact
+            // recovered glyph interiors (strips the fat outer border so adjacent letters NEVER touch!).
+            // If it's an open drop-shadow (very few enclosed interiors), render the dark shadow + any interiors.
+            bool usePureInterior = (interiorCount >= 24 && interiorCount * 6 >= darkTotal);
             byte[] closed = new byte[total];
-            for (int x = 0; x < w; x++)
+            if (usePureInterior)
             {
-                int zeros = 0;
-                for (int k = -rEro; k <= rEro; k++)
-                {
-                    int cy = k < 0 ? 0 : (k >= h ? h - 1 : k);
-                    if (eroH[cy * w + x] == 0) zeros++;
-                }
-                for (int y = 0; y < h; y++)
-                {
-                    if (zeros == 0) closed[y * w + x] = 1;
-                    int yOut = y - rEro; if (yOut < 0) yOut = 0;
-                    int yIn = y + rEro + 1; if (yIn >= h) yIn = h - 1;
-                    if (eroH[yOut * w + x] == 0) zeros--;
-                    if (eroH[yIn * w + x] == 0) zeros++;
-                }
+                for (int i = 0; i < total; i++)
+                    if (label[i] == 3) closed[i] = 1;
+            }
+            else
+            {
+                for (int i = 0; i < total; i++)
+                    if (darkMask[i] != 0 || label[i] == 3) closed[i] = 1;
             }
 
             // 3. Render with gentle 3x3 anti-aliasing onto pure white 16px-padded canvas

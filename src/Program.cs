@@ -199,6 +199,33 @@ namespace TranslatorLive
                             }
                         }
 
+                        // Test Same-Color Font + Dark Border over Matching Background (e.g. Yellow-on-Yellow / Gold-on-Gold)
+                        using (Bitmap sameColorBmp = new Bitmap(920, 140, PixelFormat.Format32bppArgb))
+                        {
+                            using (Graphics gsc = Graphics.FromImage(sameColorBmp))
+                            {
+                                gsc.Clear(Color.FromArgb(145, 130, 35)); // Medium yellow/gold background
+                                gsc.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                                using (System.Drawing.Drawing2D.GraphicsPath gp = new System.Drawing.Drawing2D.GraphicsPath())
+                                using (Font ff = new Font("Segoe UI", 26f, FontStyle.Bold))
+                                {
+                                    gp.AddString("The golden Triforce shines brightly.", ff.FontFamily, (int)FontStyle.Bold, 30f, new PointF(40f, 48f), StringFormat.GenericTypographic);
+                                    using (Pen thinBorder = new Pen(Color.FromArgb(230, 15, 15, 15), 2.2f) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+                                        gsc.DrawPath(thinBorder, gp);
+                                    using (SolidBrush goldFill = new SolidBrush(Color.FromArgb(165, 150, 45)))
+                                        gsc.FillPath(goldFill, gp);
+                                }
+                            }
+                            string scOcr = eng.RecognizeBitmap(sameColorBmp, "en", out usedOnline, out err);
+                            string scNorm = TranslationEngine.NormalizeText(scOcr, "en", true);
+                            LogTest("[OCR-SAME-COLOR-BORDER] '" + scNorm + "'");
+                            if (string.IsNullOrEmpty(scNorm) || !scNorm.ToLowerInvariant().Contains("triforce") || !scNorm.ToLowerInvariant().Contains("brightly"))
+                            {
+                                LogTest("[FAIL] Same-color font with black border OCR failed: " + scNorm);
+                                return 1;
+                            }
+                        }
+
                         // Test Game OCR Cleaning & Universal Digit-to-Letter / Ligature Restoration across ALL games
                         string dirtySample = "The man I spoke of<, dreams each night, Linle... my 9äUxyfios exhausted... mal<e your way to frule Castle.";
                         string cleanedSample = TranslationEngine.CleanGameOcrText(dirtySample, "en");
