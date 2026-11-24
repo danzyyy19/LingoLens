@@ -62,16 +62,23 @@ namespace TranslatorLive
         public bool Dark = true;
         public string UiLang = "id"; // "id" = Indonesia, "en" = English
         public int UiZoom = 100; // 75..150%
+        public int BgPattern = 0; // 0 = Arsiran Diagonal, 1 = Grid Blueprint, 2 = Dot Matrix, 3 = Polos
         public string ActiveProfile = "Default";
+        public string ActiveGameTitle = "";
+        public string GameLoreSummary = "";
+        public string TargetProcessName = ""; // Kunci OCR hanya saat jendela game/app ini aktif (kosong = semua layar)
+        public string TargetWindowTitle = "";
         public string Src = "en";
         public string Tgt = "id";
         public string Engine = "google"; // "google", "mymemory", "gemini"
         public string GeminiApiKey = "";
-        public bool NaturalTone = true;  // Bahasa luwes / tidak kaku (Anda -> kamu, idiom game)
+        public int ToneMode = 0; // 0 = Gaul (Gue/Lo), 1 = Santai (Aku/Kamu), 2 = Baku / Formal
+        public bool NaturalTone = true;  // Backward-compat mirror (ToneMode != 2)
         public bool DetectSpeaker = true; // Deteksi tag nama pembicara (mis. "Saria: ...")
         public string Glossary = "";      // Istilah/nama karakter per game (pisah ';' atau baris baru)
-        public int Interval = 180;
+        public int Interval = 100;
         public int AutoHideSeconds = 8;
+        public bool InstantSubtitleMode = true; // true = subtitle muncul langsung (tanpa jeda ketik), false = tunggu efek mesin ketik
         public bool WaitStable = false;
         public bool MergeLines = true;
         public bool HideEmpty = true;
@@ -79,7 +86,7 @@ namespace TranslatorLive
         public bool CloseToTray = true;
         public bool TrayTipShown = false;
         public bool AutoCheckUpdate = true;
-        public bool EnhanceGameOcr = true; // Penjernih teks game & kontras background
+        public bool EnhanceGameOcr = true; // Penjernih teks game & isolasi outline tanpa jeda
 
         public int Placement = 0; // 0 = terpisah, 1 = tutup asli, 2 = gabung
         public Rectangle MergedRect = Rectangle.Empty;
@@ -242,16 +249,23 @@ namespace TranslatorLive
                     sb.AppendLine("dark=" + (Dark ? 1 : 0));
                     sb.AppendLine("uiLang=" + UiLang);
                     sb.AppendLine("zoom=" + UiZoom);
+                    sb.AppendLine("bgPattern=" + BgPattern);
                     sb.AppendLine("profile=" + ActiveProfile);
+                    sb.AppendLine("gameTitle=" + (ActiveGameTitle ?? "").Replace("\r", "").Replace("\n", " "));
+                    sb.AppendLine("gameLore=" + (GameLoreSummary ?? "").Replace("\r", "").Replace("\n", " | "));
+                    sb.AppendLine("targetProc=" + (TargetProcessName ?? ""));
+                    sb.AppendLine("targetTitle=" + (TargetWindowTitle ?? "").Replace("\r", "").Replace("\n", " "));
                     sb.AppendLine("src=" + Src);
                     sb.AppendLine("tgt=" + Tgt);
                     sb.AppendLine("engine=" + Engine);
                     sb.AppendLine("geminiKey=" + GeminiApiKey);
-                    sb.AppendLine("natural=" + (NaturalTone ? 1 : 0));
+                    sb.AppendLine("toneMode=" + ToneMode);
+                    sb.AppendLine("natural=" + (ToneMode != 2 ? 1 : 0));
                     sb.AppendLine("detectSpeaker=" + (DetectSpeaker ? 1 : 0));
                     sb.AppendLine("glossary=" + (Glossary ?? "").Replace("\r", "").Replace("\n", ";"));
                     sb.AppendLine("interval=" + Interval);
                     sb.AppendLine("autoHideSec=" + AutoHideSeconds);
+                    sb.AppendLine("instantSub=" + (InstantSubtitleMode ? 1 : 0));
                     sb.AppendLine("waitStable=" + (WaitStable ? 1 : 0));
                     sb.AppendLine("mergeLines=" + (MergeLines ? 1 : 0));
                     sb.AppendLine("hideEmpty=" + (HideEmpty ? 1 : 0));
@@ -295,17 +309,30 @@ namespace TranslatorLive
                     {
                         case "dark": c.Dark = n != 0; break;
                         case "uiLang": if (v == "en" || v == "id") c.UiLang = v; break;
-                        case "zoom": c.UiZoom = Math.Max(75, Math.Min(150, n)); break;
+                        case "zoom": c.UiZoom = Math.Max(80, Math.Min(175, n)); break;
+                        case "bgPattern": c.BgPattern = Math.Max(0, Math.Min(3, n)); break;
                         case "profile": if (!string.IsNullOrEmpty(v)) c.ActiveProfile = v; break;
+                        case "gameTitle": c.ActiveGameTitle = v; break;
+                        case "gameLore": c.GameLoreSummary = v.Replace(" | ", "\n"); break;
+                        case "targetProc": c.TargetProcessName = v; break;
+                        case "targetTitle": c.TargetWindowTitle = v; break;
                         case "src": c.Src = v; break;
                         case "tgt": c.Tgt = v; break;
                         case "engine": c.Engine = v; break;
                         case "geminiKey": c.GeminiApiKey = v; break;
-                        case "natural": c.NaturalTone = n != 0; break;
+                        case "toneMode":
+                            c.ToneMode = Math.Max(0, Math.Min(2, n));
+                            c.NaturalTone = (c.ToneMode != 2);
+                            break;
+                        case "natural":
+                            c.NaturalTone = n != 0;
+                            if (!c.NaturalTone) c.ToneMode = 2;
+                            break;
                         case "detectSpeaker": c.DetectSpeaker = n != 0; break;
                         case "glossary": c.Glossary = v; break;
-                        case "interval": c.Interval = Math.Max(100, Math.Min(3000, n)); break;
+                        case "interval": c.Interval = Math.Max(60, Math.Min(3000, n)); break;
                         case "autoHideSec": c.AutoHideSeconds = Math.Max(0, Math.Min(60, n)); break;
+                        case "instantSub": c.InstantSubtitleMode = n != 0; break;
                         case "waitStable": c.WaitStable = n != 0; break;
                         case "mergeLines": c.MergeLines = n != 0; break;
                         case "hideEmpty": c.HideEmpty = n != 0; break;
@@ -386,9 +413,16 @@ namespace TranslatorLive
             lock (Sync)
             {
                 ActiveProfile = SanitizeProfileName(gameTitle);
+                ActiveGameTitle = string.IsNullOrEmpty(loaded.ActiveGameTitle) ? ActiveProfile : loaded.ActiveGameTitle;
+                GameLoreSummary = loaded.GameLoreSummary;
+                TargetProcessName = loaded.TargetProcessName;
+                TargetWindowTitle = loaded.TargetWindowTitle;
                 Src = loaded.Src;
                 Tgt = loaded.Tgt;
                 Engine = loaded.Engine;
+                ToneMode = loaded.ToneMode;
+                NaturalTone = loaded.NaturalTone;
+                InstantSubtitleMode = loaded.InstantSubtitleMode;
                 DetectSpeaker = loaded.DetectSpeaker;
                 EnhanceGameOcr = loaded.EnhanceGameOcr;
                 Glossary = loaded.Glossary;

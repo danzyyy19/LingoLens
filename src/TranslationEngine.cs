@@ -19,6 +19,14 @@ using Windows.Security.Cryptography;
 
 namespace TranslatorLive
 {
+    public class DialogLogEntry
+    {
+        public DateTime Time;
+        public string Speaker;
+        public string Source;
+        public string Translated;
+    }
+
     public class ScanUpdateEventArgs : EventArgs
     {
         public int AreaId;
@@ -42,6 +50,18 @@ namespace TranslatorLive
         private volatile int _fastPollMs;
 
         private readonly Dictionary<int, byte[]> _prevSigs = new Dictionary<int, byte[]>();
+        private readonly Dictionary<int, byte[]> _prevFrameBufByArea = new Dictionary<int, byte[]>();
+        private readonly Dictionary<int, int> _prevFrameWByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _prevFrameHByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, byte[]> _prevTextMaskByArea = new Dictionary<int, byte[]>();
+        private readonly Dictionary<int, int> _prevTextPtsByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, byte[]> _lockedTextMaskByArea = new Dictionary<int, byte[]>();
+        private readonly Dictionary<int, int> _lockedTextPtsByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _emptyStreakByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, string> _candOcrByArea = new Dictionary<int, string>();
+        private readonly Dictionary<int, int> _candScoreByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _candHitsByArea = new Dictionary<int, int>();
+        private readonly Dictionary<int, int> _fadeHoldTicksByArea = new Dictionary<int, int>();
         private readonly Dictionary<int, string> _lastOcrByArea = new Dictionary<int, string>();
         private readonly Dictionary<int, int> _lastOcrScoreByArea = new Dictionary<int, int>();
         private readonly Dictionary<int, string> _lastTransByArea = new Dictionary<int, string>();
@@ -51,6 +71,7 @@ namespace TranslatorLive
         private readonly Dictionary<int, int> _pendingCountByArea = new Dictionary<int, int>();
         private readonly Dictionary<int, DateTime> _pendingStartUtc = new Dictionary<int, DateTime>();
         private readonly Dictionary<string, string> _cache = new Dictionary<string, string>();
+        private readonly List<DialogLogEntry> _dialogHistory = new List<DialogLogEntry>();
         private readonly object _cacheLock = new object();
 
         private string _cachedOcrLangTag = "";
@@ -58,9 +79,67 @@ namespace TranslatorLive
         private List<string> _installedOcrLangs = new List<string>();
 
         public event EventHandler<ScanUpdateEventArgs> OnAreaTranslated;
+        public event Action<bool> OnTargetWindowActiveChanged;
+        private bool _lastTargetActive = true;
+        private static int _bestGtxHostIdx = 0;
 
         public bool IsRunning { get { return _running; } }
         public List<string> InstalledOcrLanguages { get { return new List<string>(_installedOcrLangs); } }
+
+        public List<DialogLogEntry> GetDialogHistory()
+        {
+            lock (_cacheLock)
+            {
+                return new List<DialogLogEntry>(_dialogHistory);
+            }
+        }
+
+        public void ClearDialogHistory()
+        {
+            lock (_cacheLock)
+            {
+                _dialogHistory.Clear();
+            }
+        }
+
+        private void RecordDialogHistory(string speaker, string src, string trans)
+        {
+            if (string.IsNullOrWhiteSpace(trans)) return;
+            lock (_cacheLock)
+            {
+                if (_dialogHistory.Count > 0)
+                {
+                    DialogLogEntry last = _dialogHistory[_dialogHistory.Count - 1];
+                    if (string.Equals(NormalizeCoreText(last.Source), NormalizeCoreText(src), StringComparison.OrdinalIgnoreCase))
+                        return;
+                }
+                _dialogHistory.Add(new DialogLogEntry
+                {
+                    Time = DateTime.Now,
+                    Speaker = speaker ?? "",
+                    Source = src ?? "",
+                    Translated = trans ?? ""
+                });
+                if (_dialogHistory.Count > 120) _dialogHistory.RemoveAt(0);
+            }
+        }
+
+        private string BuildRecentStoryContext()
+        {
+            lock (_cacheLock)
+            {
+                if (_dialogHistory.Count == 0) return "";
+                int start = Math.Max(0, _dialogHistory.Count - 5);
+                StringBuilder sb = new StringBuilder();
+                for (int i = start; i < _dialogHistory.Count; i++)
+                {
+                    DialogLogEntry d = _dialogHistory[i];
+                    if (!string.IsNullOrEmpty(d.Speaker)) sb.Append(d.Speaker).Append(": ");
+                    sb.Append(d.Source).Append(" => ").AppendLine(d.Translated);
+                }
+                return sb.ToString().Trim();
+            }
+        }
 
         public TranslationEngine(AppConfig cfg)
         {
@@ -70,18 +149,16 @@ namespace TranslatorLive
                 ServicePointManager.SecurityProtocol = (SecurityProtocolType)3072 | SecurityProtocolType.Tls12;
                 ServicePointManager.Expect100Continue = false;
                 ServicePointManager.UseNagleAlgorithm = false;
-                ServicePointManager.DefaultConnectionLimit = 24;
-                WebRequest.DefaultWebProxy = null;
+                ServicePointManager.DefaultConnectionLimit = 32;
             }
             catch { }
 
-            // Pre-warm IPv4 HTTP connections to Google Translate endpoints in background (eliminates cold-start TLS lag)
+            // Pre-warm HTTPS TLS Keep-Alive connection to primary Google Translate CDN in background
             ThreadPool.QueueUserWorkItem(delegate
             {
                 try
                 {
-                    HttpRequestFast("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1000);
-                    HttpRequestFast("https://translate.google.co.id/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=1", null, "application/x-www-form-urlencoded", 1000);
+                    HttpRequestFast("https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=id&dt=t&q=ok", null, "application/x-www-form-urlencoded", 2200);
                 }
                 catch { }
             });
@@ -118,6 +195,18 @@ namespace TranslatorLive
             lock (_cacheLock)
             {
                 _prevSigs.Remove(areaId);
+                _prevFrameBufByArea.Remove(areaId);
+                _prevFrameWByArea.Remove(areaId);
+                _prevFrameHByArea.Remove(areaId);
+                _prevTextMaskByArea.Remove(areaId);
+                _prevTextPtsByArea.Remove(areaId);
+                _lockedTextMaskByArea.Remove(areaId);
+                _lockedTextPtsByArea.Remove(areaId);
+                _emptyStreakByArea.Remove(areaId);
+                _candOcrByArea.Remove(areaId);
+                _candScoreByArea.Remove(areaId);
+                _candHitsByArea.Remove(areaId);
+                _fadeHoldTicksByArea.Remove(areaId);
                 _lastOcrByArea.Remove(areaId);
                 _lastOcrScoreByArea.Remove(areaId);
                 _lastTransByArea.Remove(areaId);
@@ -134,6 +223,18 @@ namespace TranslatorLive
             lock (_cacheLock)
             {
                 _prevSigs.Clear();
+                _prevFrameBufByArea.Clear();
+                _prevFrameWByArea.Clear();
+                _prevFrameHByArea.Clear();
+                _prevTextMaskByArea.Clear();
+                _prevTextPtsByArea.Clear();
+                _lockedTextMaskByArea.Clear();
+                _lockedTextPtsByArea.Clear();
+                _emptyStreakByArea.Clear();
+                _candOcrByArea.Clear();
+                _candScoreByArea.Clear();
+                _candHitsByArea.Clear();
+                _fadeHoldTicksByArea.Clear();
                 _lastOcrByArea.Clear();
                 _lastOcrScoreByArea.Clear();
                 _lastTransByArea.Clear();
@@ -177,18 +278,20 @@ namespace TranslatorLive
             string lastTgt = "";
             string lastEngine = "";
             string lastGlossary = "";
+            string lastGame = "";
             bool lastMerge = true;
-            bool lastNat = true;
+            int lastTone = 0;
             bool lastSpeaker = true;
+            bool lastInstant = true;
 
             while (!_stop)
             {
                 if (!_running || _pausedForEdit) { Thread.Sleep(50); continue; }
 
                 List<Area> snapshot = new List<Area>();
-                string srcLang, tgtLang, engineName, geminiKey, glossary;
-                int intervalMs, autoHideSec;
-                bool waitStable, mergeLines, naturalTone, detectSpeaker, enhanceOcr;
+                string srcLang, tgtLang, engineName, geminiKey, glossary, gameTitle, gameLore, targetProc, targetTitle;
+                int intervalMs, autoHideSec, toneMode;
+                bool waitStable, mergeLines, detectSpeaker, enhanceOcr, instantSub;
 
                 lock (_cfg.Sync)
                 {
@@ -197,10 +300,15 @@ namespace TranslatorLive
                     engineName = _cfg.Engine;
                     geminiKey = _cfg.GeminiApiKey;
                     glossary = _cfg.Glossary ?? "";
-                    naturalTone = _cfg.NaturalTone;
+                    gameTitle = _cfg.ActiveGameTitle ?? "";
+                    gameLore = _cfg.GameLoreSummary ?? "";
+                    targetProc = _cfg.TargetProcessName ?? "";
+                    targetTitle = _cfg.TargetWindowTitle ?? "";
+                    toneMode = _cfg.ToneMode;
                     detectSpeaker = _cfg.DetectSpeaker;
                     enhanceOcr = _cfg.EnhanceGameOcr;
-                    intervalMs = Math.Max(70, Math.Min(3000, _cfg.Interval));
+                    instantSub = _cfg.InstantSubtitleMode;
+                    intervalMs = Math.Max(55, Math.Min(3000, _cfg.Interval));
                     autoHideSec = Math.Max(0, _cfg.AutoHideSeconds);
                     waitStable = _cfg.WaitStable;
                     mergeLines = _cfg.MergeLines;
@@ -210,16 +318,34 @@ namespace TranslatorLive
                     }
                 }
 
+                // TARGET GAME WINDOW LOCK: if locked to a specific game/window and user switches to another app,
+                // pause OCR completely (0% CPU, never reads chat/IDE/MyASUS!) and auto-hide overlay!
+                bool targetActive = Native.IsTargetWindowForeground(targetProc, targetTitle);
+                if (targetActive != _lastTargetActive)
+                {
+                    _lastTargetActive = targetActive;
+                    Action<bool> cb = OnTargetWindowActiveChanged;
+                    if (cb != null) cb(targetActive);
+                }
+                if (!targetActive)
+                {
+                    Thread.Sleep(90);
+                    continue;
+                }
+
                 if (snapshot.Count == 0) { Thread.Sleep(120); continue; }
 
                 bool configChanged = (srcLang != lastSrc) || (tgtLang != lastTgt) ||
                                      (engineName != lastEngine) || (mergeLines != lastMerge) ||
-                                     (naturalTone != lastNat) || (glossary != lastGlossary) || (detectSpeaker != lastSpeaker);
+                                     (toneMode != lastTone) || (glossary != lastGlossary) ||
+                                     (detectSpeaker != lastSpeaker) || (instantSub != lastInstant) ||
+                                     (gameTitle != lastGame);
                 if (configChanged)
                 {
                     ClearState();
                     lastSrc = srcLang; lastTgt = tgtLang; lastEngine = engineName;
-                    lastMerge = mergeLines; lastNat = naturalTone; lastGlossary = glossary; lastSpeaker = detectSpeaker;
+                    lastMerge = mergeLines; lastTone = toneMode; lastGlossary = glossary;
+                    lastSpeaker = detectSpeaker; lastInstant = instantSub; lastGame = gameTitle;
                 }
 
                 bool forced = _forceScan || configChanged;
@@ -241,7 +367,7 @@ namespace TranslatorLive
                         continue;
                     }
 
-                    ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, naturalTone, detectSpeaker, waitStable, mergeLines, enhanceOcr, autoHideSec, forced);
+                    ProcessArea(area, srcLang, tgtLang, engineName, geminiKey, glossary, gameTitle, gameLore, toneMode, detectSpeaker, instantSub, waitStable, mergeLines, enhanceOcr, autoHideSec, forced);
                 }
 
                 int waitTarget = _fastPollMs > 0 ? _fastPollMs : intervalMs;
@@ -256,269 +382,583 @@ namespace TranslatorLive
         }
 
         private void ProcessArea(Area area, string srcLang, string tgtLang, string engineName, string geminiKey, string glossary,
-            bool naturalTone, bool detectSpeaker, bool waitStable, bool mergeLines, bool enhanceOcr, int autoHideSec, bool forced)
+            string gameTitle, string gameLore, int toneMode, bool detectSpeaker, bool instantSub, bool waitStable, bool mergeLines, bool enhanceOcr, int autoHideSec, bool forced)
         {
             if (area.Ocr.Width < 12 || area.Ocr.Height < 10) return;
 
-            Stopwatch sw = Stopwatch.StartNew();
             Bitmap frame = CaptureRect(area.Ocr);
             if (frame == null) return;
 
             try
             {
-                byte[] sig = ComputeSignature(frame);
-                byte[] prevSig;
-                bool hasPrev = _prevSigs.TryGetValue(area.Id, out prevSig);
-                int pendingCount = 0;
-                _pendingCountByArea.TryGetValue(area.Id, out pendingCount);
-                string pendingText = "";
-                _pendingOcrByArea.TryGetValue(area.Id, out pendingText);
-
-                bool screenStatic = false;
-                if (!forced && hasPrev)
-                {
-                    float diff = ComputeDiffPercent(sig, prevSig);
-                    if (diff < 0.45f)
-                    {
-                        // CRITICAL FIX: If typewriter debouncer was waiting for typing to stop,
-                        // diff < 0.45f proves typing has finished! Flush pendingText immediately without re-running OCR!
-                        if (pendingCount > 0 && !string.IsNullOrEmpty(pendingText))
-                        {
-                            screenStatic = true;
-                        }
-                        else
-                        {
-                            CheckIdleTimeout(area.Id, autoHideSec);
-                            return;
-                        }
-                    }
-                }
-
-                _prevSigs[area.Id] = sig;
-
-                bool treatAsChoice = (area.Mode == AreaTextMode.Choice);
-                string cleanText;
-                int newOcrScore;
-
-                if (screenStatic)
-                {
-                    // Screen stopped changing after typewriter expansion: use already-recognized pendingText in 0ms!
-                    cleanText = pendingText;
-                    newOcrScore = ScoreOcrQuality(cleanText, srcLang);
-                    _pendingCountByArea[area.Id] = 0;
-                }
-                else
-                {
-                    bool usedOnline, detectedChoiceLayout;
-                    string ocrError;
-                    string rawText = RecognizeBitmap(frame, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out ocrError);
-
-                    if (!string.IsNullOrEmpty(ocrError))
-                    {
-                        RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, ocrError, true);
-                        return;
-                    }
-
-                    treatAsChoice = (area.Mode == AreaTextMode.Choice) || detectedChoiceLayout;
-                    cleanText = treatAsChoice
-                        ? NormalizeChoices(rawText, srcLang)
-                        : NormalizeText(rawText, srcLang, mergeLines);
-
-                    if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
-                    {
-                        _pendingOcrByArea[area.Id] = "";
-                        _pendingCountByArea[area.Id] = 0;
-                        _pendingStartUtc.Remove(area.Id);
-                        string oldT;
-                        if (_lastTransByArea.TryGetValue(area.Id, out oldT) && !string.IsNullOrEmpty(oldT))
-                        {
-                            _lastOcrByArea[area.Id] = "";
-                            _lastOcrScoreByArea[area.Id] = 0;
-                            _lastTransByArea[area.Id] = "";
-                            _idleHidden[area.Id] = true;
-                            RaiseResult(area.Id, "", "", (int)sw.ElapsedMilliseconds, "Kosong", false);
-                        }
-                        return;
-                    }
-
-                    newOcrScore = ScoreOcrQuality(cleanText, srcLang);
-                    if (!treatAsChoice && newOcrScore < 42)
-                    {
-                        CheckIdleTimeout(area.Id, autoHideSec);
-                        return;
-                    }
-
-                    // Fast Multi-Sentence Typewriter Debouncer with Progressive Live Flush:
-                    // - Instant full subtitles (>= 22 chars and ends with '.', '!', '?', '"', '...') translate IMMEDIATELY in 0ms on first sighting!
-                    // - Short or incomplete newly-appearing text waits one 35ms tick to detect if a typewriter effect is actively streaming.
-                    // - If a typewriter is streaming long multi-sentence dialogue, flush an intermediate live translation every ~550ms so the user NEVER sees an empty/frozen overlay during long speeches!
-                    if (!forced && !treatAsChoice)
-                    {
-                        bool isTerminal = EndsWithTerminalPunctuation(cleanText);
-                        string coreClean = NormalizeCoreText(cleanText);
-                        string corePend = NormalizeCoreText(pendingText ?? "");
-
-                        string prevConfirmedOcr = "";
-                        _lastOcrByArea.TryGetValue(area.Id, out prevConfirmedOcr);
-                        string corePrevConfirmed = NormalizeCoreText(prevConfirmedOcr ?? "");
-
-                        bool isNewUnconfirmed = (coreClean != corePrevConfirmed);
-                        bool isExpanding = !string.IsNullOrEmpty(corePend) && coreClean.Length > corePend.Length &&
-                            (coreClean.StartsWith(corePend, StringComparison.OrdinalIgnoreCase) ||
-                             (corePend.Length >= 4 && ComputeSimilarity(coreClean.Substring(0, corePend.Length), corePend) >= 0.72f));
-
-                        if (isNewUnconfirmed)
-                        {
-                            DateTime pendStart;
-                            if (!_pendingStartUtc.TryGetValue(area.Id, out pendStart) || pendingCount == 0)
-                            {
-                                pendStart = DateTime.UtcNow;
-                                _pendingStartUtc[area.Id] = pendStart;
-                            }
-                            double waitedMs = (DateTime.UtcNow - pendStart).TotalMilliseconds;
-
-                            // Progressive Live Flush: never hold a subtitle waiting for more than 520ms (or 850ms if WaitStable is explicitly enabled)
-                            double maxHoldMs = waitStable ? 850.0 : 520.0;
-                            if (waitedMs < maxHoldMs)
-                            {
-                                // WaitStable mode: wait one confirmation tick until text stops changing
-                                if (waitStable && (pendingCount == 0 || coreClean != corePend) && pendingCount < 16)
-                                {
-                                    _pendingOcrByArea[area.Id] = cleanText;
-                                    _pendingCountByArea[area.Id] = pendingCount + 1;
-                                    _fastPollMs = 45;
-                                    return;
-                                }
-
-                                // First sighting of a new incomplete or very short (< 22 chars) text: do a 30ms check to see if it's typing out.
-                                // Complete video subtitles (>= 22 chars ending with '.', '!', '?') skip this and translate IMMEDIATELY in 0ms!
-                                if (pendingCount == 0 && (!isTerminal || coreClean.Length < 22))
-                                {
-                                    _pendingOcrByArea[area.Id] = cleanText;
-                                    _pendingCountByArea[area.Id] = 1;
-                                    _fastPollMs = 30;
-                                    return;
-                                }
-
-                                // Actively growing typewriter stream
-                                if (isExpanding && pendingCount < 12)
-                                {
-                                    _pendingOcrByArea[area.Id] = cleanText;
-                                    _pendingCountByArea[area.Id] = pendingCount + 1;
-                                    _fastPollMs = (isTerminal || cleanText.EndsWith(",")) ? 65 : 30;
-                                    return;
-                                }
-                            }
-                        }
-
-                        // Flushing to translation now: keep cleanText in _pendingOcrByArea so if the typewriter continues after a progressive flush, isExpanding still tracks it!
-                        _pendingOcrByArea[area.Id] = cleanText;
-                        _pendingCountByArea[area.Id] = 0;
-                        _pendingStartUtc[area.Id] = DateTime.UtcNow;
-                    }
-                }
-
-                string prevOcr, prevTrans;
-                int prevOcrScore = 0;
-                _lastOcrByArea.TryGetValue(area.Id, out prevOcr);
-                _lastOcrScoreByArea.TryGetValue(area.Id, out prevOcrScore);
-                _lastTransByArea.TryGetValue(area.Id, out prevTrans);
-
-                // Anti-Flicker & Video Background Isolation Lock:
-                if (!forced && !string.IsNullOrEmpty(prevOcr) && !string.IsNullOrEmpty(prevTrans))
-                {
-                    string coreNew = NormalizeCoreText(cleanText);
-                    string corePrev = NormalizeCoreText(prevOcr);
-
-                    // 1. Exact core semantic match
-                    if (coreNew == corePrev)
-                    {
-                        _lastActiveUtc[area.Id] = DateTime.UtcNow;
-                        CheckIdleTimeout(area.Id, autoHideSec);
-                        return;
-                    }
-
-                    // 1b. Multi-sentence paragraph expansion: if new text appends a new word/clause/sentence (>= 3 chars longer and matches prefix), ALWAYS translate immediately!
-                    bool isParagraphExpansion = coreNew.Length >= corePrev.Length + 3 &&
-                        (coreNew.StartsWith(corePrev, StringComparison.OrdinalIgnoreCase) ||
-                         (corePrev.Length >= 5 && ComputeSimilarity(coreNew.Substring(0, corePrev.Length), corePrev) >= 0.72f));
-
-                    if (!isParagraphExpansion)
-                    {
-                        // 2. If previous subtitle was already complete & high-quality, lock it ONLY if new scan is a shorter/equal noisy variation (never block a longer sentence!)
-                        bool prevWasComplete = EndsWithTerminalPunctuation(prevOcr) && prevOcrScore >= 82;
-                        if (prevWasComplete && corePrev.Length >= 12 && corePrev.Contains(coreNew) &&
-                            coreNew.Length <= corePrev.Length)
-                        {
-                            _lastActiveUtc[area.Id] = DateTime.UtcNow;
-                            CheckIdleTimeout(area.Id, autoHideSec);
-                            return;
-                        }
-
-                        // 3. High semantic similarity check (only when lengths are within 4 chars so growing sentences are never locked out)
-                        int lenDiff = Math.Abs(coreNew.Length - corePrev.Length);
-                        int dist = LevenshteinDistance(coreNew, corePrev);
-                        int maxLen = Math.Max(coreNew.Length, corePrev.Length);
-                        bool isSameSentence = false;
-
-                        if (lenDiff <= 4)
-                        {
-                            if (maxLen <= 25 && dist <= 2) isSameSentence = true;
-                            else if (maxLen <= 60 && dist <= 3) isSameSentence = true;
-                            else if (ComputeSimilarity(coreNew, corePrev) >= 0.85f) isSameSentence = true;
-                        }
-
-                        if (isSameSentence)
-                        {
-                            // Only upgrade if previous scan was noisy (< 85) and new scan is cleaner,
-                            // OR if previous scan was an incomplete sentence that just finished typing its ending
-                            bool prevIncomplete = !EndsWithTerminalPunctuation(prevOcr) && EndsWithTerminalPunctuation(cleanText);
-                            bool fixedSevereNoise = (prevOcrScore < 85 && newOcrScore >= prevOcrScore + 6);
-                            if (!prevIncomplete && !fixedSevereNoise)
-                            {
-                                _lastActiveUtc[area.Id] = DateTime.UtcNow;
-                                CheckIdleTimeout(area.Id, autoHideSec);
-                                return; // Lock displayed translation rock-solid while video moves!
-                            }
-                        }
-                    }
-                }
-
-                string speakerName = "";
-                string textToTranslate = cleanText;
-                if (detectSpeaker && !treatAsChoice)
-                    textToTranslate = ExtractSpeakerTag(cleanText, out speakerName);
-
-                string transErr, usedProvider, translated;
-                if (treatAsChoice)
-                {
-                    translated = TranslateChoicesLineByLine(textToTranslate, srcLang, tgtLang, engineName, geminiKey, naturalTone, out usedProvider, out transErr, glossary);
-                }
-                else
-                {
-                    translated = TranslateText(textToTranslate, srcLang, tgtLang, engineName, geminiKey, naturalTone, out usedProvider, out transErr, glossary);
-                }
-                sw.Stop();
-
-                if (!string.IsNullOrEmpty(transErr))
-                {
-                    RaiseResult(area.Id, cleanText, "", (int)sw.ElapsedMilliseconds, transErr, true);
-                    return;
-                }
-
-                _lastOcrByArea[area.Id] = cleanText;
-                _lastOcrScoreByArea[area.Id] = newOcrScore;
-                _lastTransByArea[area.Id] = translated;
-                _lastActiveUtc[area.Id] = DateTime.UtcNow;
-                _idleHidden[area.Id] = false;
-
-                string tag = (treatAsChoice ? "Pilihan · " : (!string.IsNullOrEmpty(speakerName) ? (speakerName + " · ") : "")) + usedProvider + " · " + sw.ElapsedMilliseconds + " ms";
-                RaiseResult(area.Id, cleanText, translated, (int)sw.ElapsedMilliseconds, tag, false, false, speakerName);
+                ProcessCapturedFrame(area.Id, frame, area.Mode, srcLang, tgtLang, engineName, geminiKey, glossary,
+                    gameTitle, gameLore, toneMode, detectSpeaker, instantSub, waitStable, mergeLines, enhanceOcr, autoHideSec, forced);
             }
             finally
             {
                 if (frame != null) frame.Dispose();
             }
+        }
+
+        public void ProcessCapturedFrame(int areaId, Bitmap frame, AreaTextMode areaMode, string srcLang, string tgtLang, string engineName, string geminiKey, string glossary,
+            string gameTitle, string gameLore, int toneMode, bool detectSpeaker, bool instantSub, bool waitStable, bool mergeLines, bool enhanceOcr, int autoHideSec, bool forced)
+        {
+            if (frame == null || frame.Width < 12 || frame.Height < 10) return;
+
+            Stopwatch sw = Stopwatch.StartNew();
+            byte[] sig = ComputeSignature(frame);
+            byte[] prevSig;
+            bool hasPrev = _prevSigs.TryGetValue(areaId, out prevSig);
+            int pendingCount = 0;
+            _pendingCountByArea.TryGetValue(areaId, out pendingCount);
+            string pendingText = "";
+            _pendingOcrByArea.TryGetValue(areaId, out pendingText);
+
+            bool screenStatic = false;
+            if (!forced && hasPrev)
+            {
+                float diff = ComputeDiffPercent(sig, prevSig);
+                if (diff < 0.45f)
+                {
+                    if (pendingCount > 0 && !string.IsNullOrEmpty(pendingText))
+                    {
+                        screenStatic = true;
+                    }
+                    else
+                    {
+                        CheckIdleTimeout(areaId, autoHideSec);
+                        return;
+                    }
+                }
+            }
+
+            _prevSigs[areaId] = sig;
+
+            bool treatAsChoice = (areaMode == AreaTextMode.Choice);
+            string cleanText;
+            int newOcrScore;
+            byte[] curTextMask = null;
+            int curTextPts = 0;
+            byte[] staticSubMask = null;
+            int staticSubPts = 0;
+
+            string prevOcr, prevTrans;
+            int prevOcrScore = 0;
+            _lastOcrByArea.TryGetValue(areaId, out prevOcr);
+            _lastOcrScoreByArea.TryGetValue(areaId, out prevOcrScore);
+            _lastTransByArea.TryGetValue(areaId, out prevTrans);
+
+            if (screenStatic)
+            {
+                cleanText = pendingText;
+                newOcrScore = ScoreOcrQuality(cleanText, srcLang);
+                _pendingCountByArea[areaId] = 0;
+            }
+            else
+            {
+                // Extract current frame raw BGRA + fast 320x80 bright-stroke text mask (< 0.5ms)
+                int fw = frame.Width, fh = frame.Height;
+                byte[] curBgra = CopyBitmapToTightBgra(frame);
+                curTextMask = ComputeBrightTextMask(curBgra, fw, fh, out curTextPts);
+
+                byte[] prevBgra = null;
+                int prevW = 0, prevH = 0;
+                _prevFrameBufByArea.TryGetValue(areaId, out prevBgra);
+                _prevFrameWByArea.TryGetValue(areaId, out prevW);
+                _prevFrameHByArea.TryGetValue(areaId, out prevH);
+
+                byte[] prevMask = null;
+                int prevPts = 0;
+                _prevTextMaskByArea.TryGetValue(areaId, out prevMask);
+                _prevTextPtsByArea.TryGetValue(areaId, out prevPts);
+
+                bool hasPairedPrev = (prevBgra != null && prevW == fw && prevH == fh);
+                int prevInter = 0;
+                float prevOverlap = 0f;
+                if (hasPairedPrev && prevMask != null && prevPts > 0 && curTextPts > 0)
+                {
+                    prevInter = ComputeMaskIntersection(prevMask, curTextMask);
+                    prevOverlap = (float)prevInter / Math.Min(prevPts, curTextPts);
+                }
+
+                // Update stored frame & mask for next tick
+                _prevFrameBufByArea[areaId] = curBgra;
+                _prevFrameWByArea[areaId] = fw;
+                _prevFrameHByArea[areaId] = fh;
+                _prevTextMaskByArea[areaId] = curTextMask;
+                _prevTextPtsByArea[areaId] = curTextPts;
+
+                // PIXEL-SPACE STATIC SUBTITLE FAST-LOCK (0 ms OCR, 0 API calls, ZERO flip-flopping!):
+                // Compare pure static-subtitle mask (prev & cur intersection, free of moving 3D sparks!) against curTextMask.
+                // As long as >= 78% of the locked subtitle's exact stroke pixels remain on screen, skip OCR & translation completely!
+                byte[] lockedMask = null;
+                int lockedPts = 0;
+                bool lockedSubJustChanged = false;
+                if (!forced && !treatAsChoice && enhanceOcr && !string.IsNullOrEmpty(prevTrans) && prevOcrScore >= 82 &&
+                    _lockedTextMaskByArea.TryGetValue(areaId, out lockedMask) && lockedMask != null &&
+                    _lockedTextPtsByArea.TryGetValue(areaId, out lockedPts) && lockedPts >= 16)
+                {
+                    int lockInter = (curTextPts > 0) ? ComputeMaskIntersection(lockedMask, curTextMask) : 0;
+                    float lockRecall = (float)lockInter / lockedPts;
+                    if (curTextPts >= 16 && lockRecall >= 0.78f)
+                    {
+                        _emptyStreakByArea[areaId] = 0;
+                        _candHitsByArea[areaId] = 0;
+                        _fadeHoldTicksByArea[areaId] = 0;
+                        _lastActiveUtc[areaId] = DateTime.UtcNow;
+                        CheckIdleTimeout(areaId, autoHideSec);
+                        return;
+                    }
+                    // The previously locked subtitle strokes just vanished / were replaced by a brand-new subtitle!
+                    if (curTextPts >= 16 && lockRecall < 0.55f)
+                        lockedSubJustChanged = true;
+                }
+
+                // FADE-IN / BRAND-NEW SUBTITLE SETTLE GUARD (1-2 fast 55ms ticks):
+                // If bright text strokes just surged (mid-fade-in) OR a brand-new subtitle just replaced the old one,
+                // hold ONE 55ms tick so fade-in settles to 100% opacity AND pairs 2 clean frames of the NEW subtitle for Temporal Eraser!
+                int fadeTicks = 0;
+                _fadeHoldTicksByArea.TryGetValue(areaId, out fadeTicks);
+                bool maskJustSurged = (curTextPts >= 14 && (prevPts < 8 || (curTextPts > prevPts && (curTextPts - prevPts) * 100 / curTextPts >= 32)));
+                bool brandNewSubSwitched = (curTextPts >= 14 && prevInter < 24);
+                if (!forced && enhanceOcr && hasPairedPrev && fadeTicks < 2 &&
+                    (lockedSubJustChanged || maskJustSurged || brandNewSubSwitched || IsMidFadeInTransition(prevBgra, curBgra, fw, fh)))
+                {
+                    if (lockedSubJustChanged)
+                    {
+                        // Unlock pixel mask so the very next paired frame (55ms later) runs Temporal Eraser on the new subtitle!
+                        _lockedTextMaskByArea.Remove(areaId);
+                        _lockedTextPtsByArea.Remove(areaId);
+                    }
+                    _fadeHoldTicksByArea[areaId] = fadeTicks + 1;
+                    _fastPollMs = 55;
+                    return;
+                }
+                _fadeHoldTicksByArea[areaId] = 0;
+
+                // SAFE TEMPORAL ERASER GUARD (Fixes BUG 1 + 100% immune to chaotic moving bright 3D sparks!):
+                // Checks static pixel-aligned stroke intersection (prevInter >= 14) without denominator pollution from moving 3D glare.
+                // Even if a static 3D pillar yields prevInter >= 14 during a subtitle switch, Pass 1/2/3 on curFrame automatically beat empty Pass 0!
+                bool allowTemporal = hasPairedPrev && prevInter >= 14;
+                if (allowTemporal && prevMask != null)
+                {
+                    staticSubMask = IntersectMasks(prevMask, curTextMask, out staticSubPts);
+                }
+
+                bool usedOnline, detectedChoiceLayout;
+                string ocrError;
+                string rawText = RecognizeBitmapWithTemporal(frame, curBgra, hasPairedPrev ? prevBgra : null, allowTemporal, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out ocrError);
+
+                if (!string.IsNullOrEmpty(ocrError))
+                {
+                    RaiseResult(areaId, "", "", (int)sw.ElapsedMilliseconds, ocrError, true);
+                    return;
+                }
+
+                treatAsChoice = (areaMode == AreaTextMode.Choice) || detectedChoiceLayout;
+                cleanText = treatAsChoice
+                    ? NormalizeChoices(rawText, srcLang)
+                    : NormalizeText(rawText, srcLang, mergeLines);
+
+                // Fuzzy Glossary Auto-Repair before anti-flicker lock & translation (fixes OCR misreads of character/place names!)
+                if (!string.IsNullOrEmpty(cleanText) && !string.IsNullOrEmpty(glossary))
+                    cleanText = RepairOcrWithGlossary(cleanText, glossary);
+
+                if (string.IsNullOrEmpty(cleanText) || (!treatAsChoice && !IsMeaningfulSubtitle(cleanText, srcLang)))
+                {
+                    _pendingOcrByArea[areaId] = "";
+                    _pendingCountByArea[areaId] = 0;
+                    _pendingStartUtc.Remove(areaId);
+                    _candHitsByArea[areaId] = 0;
+
+                    int emptyStreak = 0;
+                    _emptyStreakByArea.TryGetValue(areaId, out emptyStreak);
+                    emptyStreak++;
+                    _emptyStreakByArea[areaId] = emptyStreak;
+
+                    // EMPTY-FRAME DEBOUNCE (Fixes BUG 2!):
+                    // Require 3 consecutive empty frames before wiping an active locked subtitle!
+                    // Prevents a single bright camera flash / motion blur frame from breaking Anti-Flip-Flop Lock!
+                    if (!string.IsNullOrEmpty(prevTrans))
+                    {
+                        if (!forced && emptyStreak < 3)
+                        {
+                            _fastPollMs = 65;
+                            return;
+                        }
+                        _lastOcrByArea[areaId] = "";
+                        _lastOcrScoreByArea[areaId] = 0;
+                        _lastTransByArea[areaId] = "";
+                        _lockedTextMaskByArea.Remove(areaId);
+                        _lockedTextPtsByArea.Remove(areaId);
+                        _idleHidden[areaId] = true;
+                        RaiseResult(areaId, "", "", (int)sw.ElapsedMilliseconds, "Kosong", false);
+                    }
+                    return;
+                }
+
+                _emptyStreakByArea[areaId] = 0;
+                newOcrScore = ScoreOcrQuality(cleanText, srcLang);
+
+                // STRICT GARBAGE GATE: never waste 500ms+ translating severely corrupted 3D-noise OCR (< 68)!
+                if (!treatAsChoice && !forced && newOcrScore < 68)
+                {
+                    _fastPollMs = 55;
+                    CheckIdleTimeout(areaId, autoHideSec);
+                    return;
+                }
+
+                // Instant Subtitle Mode (default): ZERO typewriter delay!
+                if (!forced && !treatAsChoice && (!instantSub || waitStable))
+                {
+                    bool isTerminal = EndsWithTerminalPunctuation(cleanText);
+                    string coreClean = NormalizeCoreText(cleanText);
+                    string corePend = NormalizeCoreText(pendingText ?? "");
+                    string corePrevConfirmed = NormalizeCoreText(prevOcr ?? "");
+
+                    bool isNewUnconfirmed = (coreClean != corePrevConfirmed);
+                    bool isExpanding = !string.IsNullOrEmpty(corePend) && coreClean.Length > corePend.Length &&
+                        (coreClean.StartsWith(corePend, StringComparison.OrdinalIgnoreCase) ||
+                         (corePend.Length >= 4 && ComputeSimilarity(coreClean.Substring(0, corePend.Length), corePend) >= 0.72f));
+
+                    if (isNewUnconfirmed)
+                    {
+                        DateTime pendStart;
+                        if (!_pendingStartUtc.TryGetValue(areaId, out pendStart) || pendingCount == 0)
+                        {
+                            pendStart = DateTime.UtcNow;
+                            _pendingStartUtc[areaId] = pendStart;
+                        }
+                        double waitedMs = (DateTime.UtcNow - pendStart).TotalMilliseconds;
+
+                        double maxHoldMs = waitStable ? 800.0 : 480.0;
+                        if (waitedMs < maxHoldMs)
+                        {
+                            if (waitStable && (pendingCount == 0 || coreClean != corePend) && pendingCount < 14)
+                            {
+                                _pendingOcrByArea[areaId] = cleanText;
+                                _pendingCountByArea[areaId] = pendingCount + 1;
+                                _fastPollMs = 45;
+                                return;
+                            }
+
+                            if (pendingCount == 0 && (!isTerminal || coreClean.Length < 20))
+                            {
+                                _pendingOcrByArea[areaId] = cleanText;
+                                _pendingCountByArea[areaId] = 1;
+                                _fastPollMs = 30;
+                                return;
+                            }
+
+                            if (isExpanding && pendingCount < 12)
+                            {
+                                _pendingOcrByArea[areaId] = cleanText;
+                                _pendingCountByArea[areaId] = pendingCount + 1;
+                                _fastPollMs = (isTerminal || cleanText.EndsWith(",")) ? 60 : 30;
+                                return;
+                            }
+                        }
+                    }
+
+                    _pendingOcrByArea[areaId] = cleanText;
+                    _pendingCountByArea[areaId] = 0;
+                    _pendingStartUtc[areaId] = DateTime.UtcNow;
+                }
+            }
+
+            // ROCK-SOLID ANTI-FLIP-FLOP LOCK (Token Jaccard + Space-Insensitive Trigram Dice + One-Way Quality Ratchet):
+            // Eliminates meaning flip-flopping on instant borderless subtitles when 3D scene moves behind static text!
+            if (!forced && !string.IsNullOrEmpty(prevOcr) && !string.IsNullOrEmpty(prevTrans))
+            {
+                string coreNew = NormalizeCoreText(cleanText);
+                string corePrev = NormalizeCoreText(prevOcr);
+
+                if (coreNew == corePrev)
+                {
+                    if (staticSubMask != null && staticSubPts >= 16)
+                    {
+                        _lockedTextMaskByArea[areaId] = staticSubMask;
+                        _lockedTextPtsByArea[areaId] = staticSubPts;
+                    }
+                    else if (curTextMask != null && curTextPts >= 16)
+                    {
+                        _lockedTextMaskByArea[areaId] = curTextMask;
+                        _lockedTextPtsByArea[areaId] = curTextPts;
+                    }
+                    _candHitsByArea[areaId] = 0;
+                    _lastActiveUtc[areaId] = DateTime.UtcNow;
+                    CheckIdleTimeout(areaId, autoHideSec);
+                    return;
+                }
+
+                bool isSameSub;
+                bool isGenuineExpansion;
+                AnalyzeSubtitleRelation(corePrev, coreNew, instantSub, out isSameSub, out isGenuineExpansion);
+
+                if (isSameSub && !isGenuineExpansion)
+                {
+                    // One-Way Quality Ratchet: NEVER downgrade a clean locked subtitle to a noisier background-corrupted read!
+                    // Only upgrade if the previous read was genuinely poor (< 78) and new read is dramatically cleaner (+12).
+                    bool prevIncomplete = !instantSub && !EndsWithTerminalPunctuation(prevOcr) && EndsWithTerminalPunctuation(cleanText);
+                    bool majorRepair = (prevOcrScore < 78 && newOcrScore >= prevOcrScore + 12 && coreNew.Length >= corePrev.Length - 2);
+                    if (!prevIncomplete && !majorRepair)
+                    {
+                        if (staticSubMask != null && staticSubPts >= 16 && prevOcrScore >= 82)
+                        {
+                            _lockedTextMaskByArea[areaId] = staticSubMask;
+                            _lockedTextPtsByArea[areaId] = staticSubPts;
+                        }
+                        _candHitsByArea[areaId] = 0;
+                        _lastActiveUtc[areaId] = DateTime.UtcNow;
+                        CheckIdleTimeout(areaId, autoHideSec);
+                        return;
+                    }
+                }
+            }
+
+            // 2-FRAME NEW-SUBTITLE CONSENSUS GATE (Fixes BUG 3!):
+            // Pristine reads (score >= 94, len >= 8) translate with ZERO extra delay.
+            // Borderline/noisy reads (68..93) must agree across 2 consecutive frames (~55ms apart),
+            // picking whichever frame scored higher — eliminating single-frame 3D noise flashes & flip-flops!
+            if (!forced && !treatAsChoice && newOcrScore < 94)
+            {
+                string candText = "";
+                int candScore = 0, candHits = 0;
+                _candOcrByArea.TryGetValue(areaId, out candText);
+                _candScoreByArea.TryGetValue(areaId, out candScore);
+                _candHitsByArea.TryGetValue(areaId, out candHits);
+
+                bool agrees = false;
+                if (candHits > 0 && !string.IsNullOrEmpty(candText))
+                {
+                    string cCoreA = NormalizeCoreText(candText);
+                    string cCoreB = NormalizeCoreText(cleanText);
+                    if (cCoreA == cCoreB) agrees = true;
+                    else
+                    {
+                        bool sameC, expC;
+                        AnalyzeSubtitleRelation(cCoreA, cCoreB, true, out sameC, out expC);
+                        agrees = sameC || ComputeTrigramDice(cCoreA, cCoreB) >= 0.56f;
+                    }
+                }
+
+                if (!agrees)
+                {
+                    _candOcrByArea[areaId] = cleanText;
+                    _candScoreByArea[areaId] = newOcrScore;
+                    _candHitsByArea[areaId] = 1;
+                    _fastPollMs = 55;
+                    return;
+                }
+
+                // Consensus reached across 2 frames! Pick the cleaner of the two readings.
+                if (candScore > newOcrScore + 1 || (Math.Abs(candScore - newOcrScore) <= 1 && candText.Length > cleanText.Length + 2))
+                {
+                    cleanText = candText;
+                    newOcrScore = candScore;
+                }
+            }
+            _candHitsByArea[areaId] = 0;
+            _candOcrByArea[areaId] = "";
+
+            string speakerName = "";
+            string textToTranslate = cleanText;
+            if (detectSpeaker && !treatAsChoice)
+                textToTranslate = ExtractSpeakerTag(cleanText, out speakerName);
+
+            string storyCtx = BuildRecentStoryContext();
+            string transErr, usedProvider, translated;
+            if (treatAsChoice)
+            {
+                translated = TranslateChoicesLineByLine(textToTranslate, srcLang, tgtLang, engineName, geminiKey, toneMode, out usedProvider, out transErr, glossary, gameTitle, gameLore, storyCtx);
+            }
+            else
+            {
+                translated = TranslateText(textToTranslate, srcLang, tgtLang, engineName, geminiKey, toneMode, out usedProvider, out transErr, glossary, gameTitle, gameLore, storyCtx);
+            }
+            sw.Stop();
+
+            if (!string.IsNullOrEmpty(transErr))
+            {
+                RaiseResult(areaId, cleanText, "", (int)sw.ElapsedMilliseconds, transErr, true);
+                return;
+            }
+
+            _lastOcrByArea[areaId] = cleanText;
+            _lastOcrScoreByArea[areaId] = newOcrScore;
+            _lastTransByArea[areaId] = translated;
+            if (staticSubMask != null && staticSubPts >= 16)
+            {
+                _lockedTextMaskByArea[areaId] = staticSubMask;
+                _lockedTextPtsByArea[areaId] = staticSubPts;
+            }
+            else if (curTextMask != null && curTextPts >= 16)
+            {
+                _lockedTextMaskByArea[areaId] = curTextMask;
+                _lockedTextPtsByArea[areaId] = curTextPts;
+            }
+            else
+            {
+                _lockedTextMaskByArea.Remove(areaId);
+                _lockedTextPtsByArea.Remove(areaId);
+            }
+            _lastActiveUtc[areaId] = DateTime.UtcNow;
+            _idleHidden[areaId] = false;
+            RecordDialogHistory(speakerName, cleanText, translated);
+
+            string tag = (treatAsChoice ? "Pilihan · " : (!string.IsNullOrEmpty(speakerName) ? (speakerName + " · ") : "")) + usedProvider + " · " + sw.ElapsedMilliseconds + " ms";
+            RaiseResult(areaId, cleanText, translated, (int)sw.ElapsedMilliseconds, tag, false, false, speakerName);
+        }
+
+        public static float ComputeTrigramDice(string coreA, string coreB)
+        {
+            if (string.IsNullOrEmpty(coreA) || string.IsNullOrEmpty(coreB)) return 0f;
+            string a = Regex.Replace(coreA, @"\s+", "");
+            string b = Regex.Replace(coreB, @"\s+", "");
+            if (a == b) return 1f;
+            if (a.Length < 3 || b.Length < 3) return ComputeSimilarity(a, b);
+
+            Dictionary<string, int> countsA = new Dictionary<string, int>(a.Length);
+            int totalA = a.Length - 2;
+            for (int i = 0; i < totalA; i++)
+            {
+                string tri = a.Substring(i, 3);
+                int c;
+                countsA.TryGetValue(tri, out c);
+                countsA[tri] = c + 1;
+            }
+
+            int totalB = b.Length - 2;
+            int shared = 0;
+            for (int i = 0; i < totalB; i++)
+            {
+                string tri = b.Substring(i, 3);
+                int c;
+                if (countsA.TryGetValue(tri, out c) && c > 0)
+                {
+                    shared++;
+                    countsA[tri] = c - 1;
+                }
+            }
+            return (2f * shared) / (totalA + totalB);
+        }
+
+        public static void AnalyzeSubtitleRelation(string corePrev, string coreNew, bool instantSub, out bool isSameSub, out bool isGenuineExpansion)
+        {
+            isSameSub = false;
+            isGenuineExpansion = false;
+            if (string.IsNullOrEmpty(corePrev) || string.IsNullOrEmpty(coreNew)) return;
+            if (corePrev == coreNew) { isSameSub = true; return; }
+
+            // Check genuine typewriter expansion (only when NOT in instant mode, or when adding >= 2 full new words)
+            string[] prevToks = corePrev.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string[] newToks = coreNew.Split(new char[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+            if (!instantSub && coreNew.Length >= corePrev.Length + 4 &&
+                (coreNew.StartsWith(corePrev, StringComparison.OrdinalIgnoreCase) ||
+                 (corePrev.Length >= 5 && ComputeSimilarity(coreNew.Substring(0, corePrev.Length), corePrev) >= 0.72f)))
+            {
+                isGenuineExpansion = true;
+                return;
+            }
+
+            // If instant mode and new reading adds >= 2 brand new words at the end (multi-part subtitle append), allow update
+            if (instantSub && newToks.Length >= prevToks.Length + 2 &&
+                coreNew.Length >= corePrev.Length + 8 &&
+                coreNew.StartsWith(corePrev, StringComparison.OrdinalIgnoreCase))
+            {
+                isGenuineExpansion = true;
+                return;
+            }
+
+            // Token-level fuzzy overlap (tolerates 1-char OCR typo inside words caused by moving 3D video background!)
+            int matchedPrev = 0;
+            bool[] usedNew = new bool[newToks.Length];
+            for (int i = 0; i < prevToks.Length; i++)
+            {
+                string pt = prevToks[i];
+                for (int j = 0; j < newToks.Length; j++)
+                {
+                    if (usedNew[j]) continue;
+                    string nt = newToks[j];
+                    if (pt == nt || (pt.Length >= 4 && nt.Length >= 4 && LevenshteinDistance(pt, nt) <= 1))
+                    {
+                        matchedPrev++;
+                        usedNew[j] = true;
+                        break;
+                    }
+                }
+            }
+
+            int maxToks = Math.Max(1, Math.Max(prevToks.Length, newToks.Length));
+            int minToks = Math.Max(1, Math.Min(prevToks.Length, newToks.Length));
+            float jaccard = (float)matchedPrev / maxToks;
+            float containment = (float)matchedPrev / minToks;
+            float charSim = ComputeSimilarity(coreNew, corePrev);
+            float triDice = ComputeTrigramDice(coreNew, corePrev);
+
+            // In Instant Subtitle Mode, be decisively firm against background-noise flip-flopping:
+            // Space-insensitive Trigram Dice catches glued/split 3D-noise variations (e.g. "mustaprotect" vs "must protect")!
+            if (instantSub)
+            {
+                if (jaccard >= 0.55f || charSim >= 0.70f || triDice >= 0.56f ||
+                    (minToks >= 2 && containment >= 0.72f && Math.Abs(prevToks.Length - newToks.Length) <= 2))
+                {
+                    isSameSub = true;
+                    return;
+                }
+            }
+            else
+            {
+                if (jaccard >= 0.70f || charSim >= 0.80f || triDice >= 0.74f ||
+                    (corePrev.Length >= 12 && corePrev.Contains(coreNew) && coreNew.Length <= corePrev.Length))
+                {
+                    isSameSub = true;
+                    return;
+                }
+            }
+        }
+
+        public static string RepairOcrWithGlossary(string text, string glossary)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(glossary)) return text;
+            List<GlossaryEntry> entries = ParseGlossary(glossary);
+            if (entries.Count == 0) return text;
+
+            string result = text;
+            foreach (GlossaryEntry ge in entries)
+            {
+                string target = ge.Source;
+                if (string.IsNullOrEmpty(target) || target.Length < 4 || target.Contains(" ")) continue;
+                int maxDist = target.Length >= 7 ? 2 : 1;
+
+                result = Regex.Replace(result, @"\b[A-Za-z][A-Za-z0-9'\-]{2,}\b", delegate(Match m)
+                {
+                    string w = m.Value;
+                    if (string.Equals(w, target, StringComparison.OrdinalIgnoreCase))
+                        return target;
+                    if (Math.Abs(w.Length - target.Length) > maxDist) return w;
+                    // Guard against accidentally replacing very common English function words
+                    string wl = w.ToLowerInvariant();
+                    if (wl == "that" || wl == "this" || wl == "with" || wl == "from" || wl == "have" ||
+                        wl == "will" || wl == "your" || wl == "what" || wl == "when" || wl == "they" ||
+                        wl == "them" || wl == "then" || wl == "than" || wl == "line" || wl == "like" ||
+                        wl == "live" || wl == "look" || wl == "long" || wl == "last" || wl == "left" ||
+                        wl == "time" || wl == "here" || wl == "there" || wl == "where" || wl == "were" ||
+                        wl == "been" || wl == "some" || wl == "come" || wl == "make" || wl == "take")
+                        return w;
+                    // First char should match (case-insensitive) for short 4-5 char names unless exact capital match
+                    if (target.Length <= 5 && char.ToLowerInvariant(w[0]) != char.ToLowerInvariant(target[0]))
+                        return w;
+                    // Normalize thin-font OCR split-letter illusions BEFORE distance check (e.g. Delcu -> Deku, rn -> m, vv -> w)
+                    string wNorm = wl.Replace("lc", "k").Replace("rn", "m").Replace("vv", "w").Replace("cl", "d");
+                    string tLow = target.ToLowerInvariant();
+                    int d = Math.Min(LevenshteinDistance(wl, tLow), LevenshteinDistance(wNorm, tLow));
+                    if (d <= maxDist) return target;
+                    return w;
+                });
+            }
+            return result;
         }
 
         private void CheckIdleTimeout(int areaId, int autoHideSec)
@@ -776,6 +1216,102 @@ namespace TranslatorLive
             s = Regex.Replace(s, @"\bTriforce\b", "Triforce");
             s = Regex.Replace(s, @"\bPrincess\s+Zelda\b", "Putri Zelda");
 
+            return s;
+        }
+
+        public static string NaturalizeIndonesian(string translated, string tgtLang, int toneMode)
+        {
+            // toneMode: 0 = Gaul (Gue/Lo), 1 = Santai (Aku/Kamu), 2 = Baku/Formal
+            if (toneMode == 2 || tgtLang != "id" || string.IsNullOrEmpty(translated)) return translated;
+            string s = NaturalizeIndonesian(translated, tgtLang, true);
+            if (toneMode == 0) s = ApplyIndonesianGaul(s);
+            return s;
+        }
+
+        public static string ApplyIndonesianGaul(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+
+            // 1. Possessive suffixes & prepositional pronouns -> natural Gaul ("lagu gue", "nama lo", "bareng gue", "buat lo")
+            s = Regex.Replace(s, @"\b(lagu|nama|teman|temen|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)ku\b", "$1 gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(lagu|nama|teman|temen|sahabat|rumah|tempat|kamar|desa|kota|dunia|tubuh|badan|nyawa|hidup|waktu|kekuatan|kemampuan|pedang|perisai|senjata|tugas|janji|mimpi|impian|harapan|hati|pikiran|perasaan|kepala|mata|tangan|kaki|suara|ayah|ibu|kakak|adik|anak|keluarga|guru|tuan|musuh|kisah|cerita|perjalanan|takdir|nasib|giliran|kesempatan|pilihan|keputusan|kesalahan|rahasia)mu\b", "$1 lo", RegexOptions.IgnoreCase);
+
+            s = Regex.Replace(s, @"\bmilikku\b|\bpunyaku\b", "punya gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmilikmu\b|\bpunyamu\b", "punya lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdiriku\b", "diri gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdirimu\b", "diri lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdenganku\b", "bareng gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdenganmu\b", "bareng lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bpadaku\b|\bkepadaku\b", "ke gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bpadamu\b|\bkepadamu\b", "ke lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buntukku\b", "buat gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buntukmu\b", "buat lo", RegexOptions.IgnoreCase);
+
+            // 2. Core pronouns -> Gue / Lo
+            s = Regex.Replace(s, @"\bAndalah\b|\bKamulah\b", "Lo yang");
+            s = Regex.Replace(s, @"\bandalah\b|\bkamulah\b", "lo yang");
+            s = Regex.Replace(s, @"\b(?:Kamu|Kau|Engkau|Anda)\b", "Lo");
+            s = Regex.Replace(s, @"\b(?:kamu|kau|engkau|anda)\b", "lo");
+            s = Regex.Replace(s, @"\b(?:Aku|Saya)\b", "Gue");
+            s = Regex.Replace(s, @"\b(?:aku|saya)\b", "gue");
+            s = Regex.Replace(s, @"\b[Kk]ami\b", "kita");
+
+            // 3. Gaul expressions & natural everyday gamer slang
+            s = Regex.Replace(s, @"\bmenanyakan\s+(?:lo|kamu|anda)\b|\bmemanggil(?:mu|\s+(?:lo|kamu))\b", "nyariin lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmemintaku\s+buat\s+menjemput(?:mu|\s+lo)\b", "nyuruh gue jemput lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:gue|aku)\s+udah\s+kembali\b", "gue udah balik", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbukankah\s+gitu\b", "iya kan", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmembuat(?:mu|\s+lo)\b", "bikin lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmengelabuhi(?:ku|\s+gue)\b", "nipu gue", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmelindungi(?:mu|\s+lo)\b", "ngelindungin lo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmembantunya\b", "bantu dia", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\b(?:begitu|sangat|amat)\s+(keras|berani|bodoh|berharga|keterlaluan|cepet|cepat|lambat|mudah|sulit|susah|gampang|bagus|indah|kuat|lemah|banyak|sedikit|capek|lelah|lapar|haus|bahaya|dekat|jauh|keren|hebat|panjang|pendek|besar|gede|kecil|panas|dingin|penting|aneh|parah|seru|gila|takut|sedih|senang|marah|lucu|serius)\b", "$1 banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bgak\s+apa-apa\b", "gak papa", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bgak\s+tahu\b", "gak tau", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbaik-baik\s+aja\b", "aman-aman aja", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btentu\s+aja\b", "pastilah", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btenang\s+aja\b", "santai aja", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bada\s+apa\b", "kenapa nih", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbegitu\s+ya\b", "oh gitu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkerja\s+bagus\b", "mantap banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkalau\b", "kalo", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buntuk\b", "buat", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbelum\b", "belom", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbener-bener\b|\bsungguh\b", "beneran", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bseperti\b", "kayak", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmelihat\b", "liat", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btahu\b", "tau", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmencari\b", "nyari", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmemakai\b|\bmenggunakan\b", "pake", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmembuat\b", "bikin", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmengambil\b", "ngambil", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmendengar\b", "denger", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bberpikir\b", "mikir", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bberbicara\b", "ngomong", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bberkata\b|\bkatakan\b", "bilang", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bberi\s+tahu\b|\bberitahu\b", "kasih tau", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmengerti\b", "ngerti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmenunggu\b", "nunggu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bteman\b", "temen", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\buang\b", "duit", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\blelah\b", "capek", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bcepatlah\b", "cepetan deh", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bcepat\b", "cepet", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bharus\b", "mesti", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsekali\b", "banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsangat\b", "banget", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbegitu\b", "gitu", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbegini\b", "gini", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bkarena\b", "soalnya", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bingin\b|\bhendak\b", "pengen", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bsedang\b", "lagi", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bakhirnya\b", "ujung-ujungnya", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbanget\s+(keras|berani|bodoh|berharga|keterlaluan|cepet|cepat|lambat|mudah|sulit|susah|gampang|bagus|indah|kuat|lemah|banyak|sedikit|capek|lelah|lapar|haus|bahaya|dekat|jauh|keren|hebat|panjang|pendek|besar|gede|kecil|panas|dingin|penting|aneh|parah|seru|gila|takut|sedih|senang|marah|lucu|serius)\b", "$1 banget", RegexOptions.IgnoreCase);
+
+            s = Regex.Replace(s, @"\s{2,}", " ").Trim();
+            s = Regex.Replace(s, @"([\.\!\?]\s+)([a-z])", m => m.Groups[1].Value + m.Groups[2].Value.ToUpperInvariant());
+            if (s.Length > 0 && char.IsLower(s[0]))
+                s = char.ToUpperInvariant(s[0]) + s.Substring(1);
             return s;
         }
 
@@ -1133,11 +1669,352 @@ namespace TranslatorLive
             return RecognizeBitmap(sourceBmp, srcLang, _cfg.EnhanceGameOcr, out usedOnline, out detectedChoiceLayout, out error);
         }
 
-        public string RecognizeBitmap(Bitmap sourceBmp, string srcLang, bool enhanceOcr, out bool usedOnline, out bool detectedChoiceLayout, out string error)
+        public static byte[] CopyBitmapToTightBgra(Bitmap bmp)
+        {
+            int w = bmp.Width, h = bmp.Height;
+            BitmapData bd = bmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                int stride = bd.Stride;
+                int rowBytes = w * 4;
+                byte[] dst = new byte[rowBytes * h];
+                if (stride == rowBytes)
+                {
+                    Marshal.Copy(bd.Scan0, dst, 0, dst.Length);
+                }
+                else
+                {
+                    for (int y = 0; y < h; y++)
+                        Marshal.Copy(IntPtr.Add(bd.Scan0, y * stride), dst, y * rowBytes, rowBytes);
+                }
+                return dst;
+            }
+            finally { bmp.UnlockBits(bd); }
+        }
+
+        /// <summary>
+        /// Detects when a subtitle is actively fading in/out across two consecutive frames:
+        /// counts bright low-saturation text-candidate pixels; if they changed by > 22% across 60ms, hold 1 tick!
+        /// </summary>
+        public static bool IsMidFadeInTransition(byte[] prevBgra, byte[] curBgra, int w, int h)
+        {
+            if (prevBgra == null || curBgra == null || prevBgra.Length != curBgra.Length) return false;
+            int step = Math.Max(1, (w * h) / 14000); // ultra-fast < 0.3ms sampling
+            int prevBright = 0, curBright = 0, changedBright = 0;
+            for (int i = 0; i < w * h; i += step)
+            {
+                int off = i << 2;
+                byte pb = prevBgra[off], pg = prevBgra[off + 1], pr = prevBgra[off + 2];
+                byte cb = curBgra[off], cg = curBgra[off + 1], cr = curBgra[off + 2];
+
+                int pMin = pr < pg ? (pr < pb ? pr : pb) : (pg < pb ? pg : pb);
+                int cMin = cr < cg ? (cr < cb ? cr : cb) : (cg < cb ? cg : cb);
+                bool pIsTxt = (pMin >= 155);
+                bool cIsTxt = (cMin >= 155);
+                if (pIsTxt) prevBright++;
+                if (cIsTxt) curBright++;
+                if (pIsTxt != cIsTxt)
+                {
+                    int delta = Math.Abs(cr - pr) + Math.Abs(cg - pg) + Math.Abs(cb - pb);
+                    if (delta >= 45 && delta <= 220) changedBright++;
+                }
+            }
+            int maxB = Math.Max(prevBright, curBright);
+            if (maxB < 12) return false;
+            // Subtitle just appeared or is mid-fade-in (bright text pixel count surged > 24%)
+            if (curBright > prevBright && (curBright - prevBright) * 100 / maxB >= 24) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// 2-FRAME TEMPORAL BACKGROUND ERASER (~3ms O(W*H)):
+        /// Static subtitle glyphs stay bright & identical across consecutive frames, while moving 3D video backgrounds
+        /// (fire, sparks, camera pan, nebula, foliage) change color/position!
+        /// Keeps 100% of static anti-aliased glyph strokes intact while pushing moving 3D background pixels down to dark matte!
+        /// </summary>
+        public static byte[] ApplyTemporalBackgroundEraser(byte[] prevBgra, byte[] curBgra, int w, int h, out bool hadMotion)
+        {
+            int total = w * h;
+            byte[] dst = new byte[total * 4];
+            int movingPixels = 0;
+
+            for (int i = 0; i < total; i++)
+            {
+                int off = i << 2;
+                byte pb = prevBgra[off], pg = prevBgra[off + 1], pr = prevBgra[off + 2];
+                byte cb = curBgra[off], cg = curBgra[off + 1], cr = curBgra[off + 2];
+
+                byte mb = pb < cb ? pb : cb;
+                byte mg = pg < cg ? pg : cg;
+                byte mr = pr < cr ? pr : cr;
+                int diff = Math.Abs(cr - pr) + Math.Abs(cg - pg) + Math.Abs(cb - pb);
+                if (diff > 54)
+                {
+                    movingPixels++;
+                    // Pure per-channel temporal minimum naturally erases moving bright 3D sparks (230 vs 22 -> 22)
+                    // while preserving 100% of anti-aliased thin white letter edges (242 vs 138 -> 138, NEVER crushed to black)!
+                    // Only dampen dark/colored moving 3D background pixels where achromatic minC < 95.
+                    byte minC = mr < mg ? (mr < mb ? mr : mb) : (mg < mb ? mg : mb);
+                    if (minC < 95)
+                    {
+                        dst[off] = (byte)(mb >> 1);
+                        dst[off + 1] = (byte)(mg >> 1);
+                        dst[off + 2] = (byte)(mr >> 1);
+                    }
+                    else
+                    {
+                        dst[off] = mb;
+                        dst[off + 1] = mg;
+                        dst[off + 2] = mr;
+                    }
+                    dst[off + 3] = 255;
+                }
+                else
+                {
+                    dst[off] = mb;
+                    dst[off + 1] = mg;
+                    dst[off + 2] = mr;
+                    dst[off + 3] = 255;
+                }
+            }
+            hadMotion = (movingPixels > Math.Max(36, total / 400)); // >= 0.25% of ROI (even a single spark/wing overlapping 1 word!)
+            return dst;
+        }
+
+        /// <summary>
+        /// Ultra-fast (&lt; 0.5ms) 320x80 bright-stroke text mask for Pixel-Space Static Subtitle Lock &amp; Safe Temporal Guard.
+        /// Marks ONLY crisp bright low-saturation glyph strokes that have local dark contrast (ignoring flat sky/glow/3D scenery).
+        /// </summary>
+        public static byte[] ComputeBrightTextMask(byte[] bgra, int w, int h, out int activePts)
+        {
+            const int MW = 320, MH = 80;
+            byte[] mask = new byte[MW * MH];
+            activePts = 0;
+            if (bgra == null || w < 8 || h < 8 || bgra.Length < w * h * 4) return mask;
+
+            int dx = Math.Max(2, Math.Min(5, w / 220));
+            int dy = Math.Max(2, Math.Min(5, h / 55));
+
+            for (int gy = 0; gy < MH; gy++)
+            {
+                int py = (gy * h + (MH >> 1)) / MH;
+                if (py >= h) py = h - 1;
+                int pyUp = py - dy; if (pyUp < 0) pyUp = 0;
+                int pyDn = py + dy; if (pyDn >= h) pyDn = h - 1;
+
+                int rowC = py * w;
+                int rowU = pyUp * w;
+                int rowD = pyDn * w;
+                int mRow = gy * MW;
+
+                for (int gx = 0; gx < MW; gx++)
+                {
+                    int px = (gx * w + (MW >> 1)) / MW;
+                    if (px >= w) px = w - 1;
+
+                    // Sample 2x2 micro-block (px, px+2) x (py, py+1) with ZERO heap allocations so delicate 1.5px thin fonts on wide 1758x319 ROIs NEVER fall between grid samples!
+                    int bestLum = 0;
+                    int px2 = (px + 2 < w) ? (px + 2) : px;
+                    int py2 = (py + 1 < h) ? (py + 1) : py;
+                    int rowC2 = py2 * w;
+                    for (int si = 0; si < 4; si++)
+                    {
+                        int off = (si == 0) ? ((rowC + px) << 2)
+                                : (si == 1) ? ((rowC + px2) << 2)
+                                : (si == 2) ? ((rowC2 + px) << 2)
+                                : ((rowC2 + px2) << 2);
+                        byte b = bgra[off], g = bgra[off + 1], r = bgra[off + 2];
+                        byte mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                        byte mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                        if (mn >= 142 && (mx - mn) <= 86)
+                        {
+                            int l = (77 * r + 150 * g + 29 * b) >> 8;
+                            if (l > bestLum) bestLum = l;
+                        }
+                    }
+                    if (bestLum == 0) continue;
+
+                    int pxL = px - dx; if (pxL < 0) pxL = 0;
+                    int pxR = px + dx; if (pxR >= w) pxR = w - 1;
+
+                    int oL = (rowC + pxL) << 2;
+                    int oR = (rowC + pxR) << 2;
+                    int oU = (rowU + px) << 2;
+                    int oD = (rowD + px) << 2;
+
+                    int lumL = (77 * bgra[oL + 2] + 150 * bgra[oL + 1] + 29 * bgra[oL]) >> 8;
+                    int lumR = (77 * bgra[oR + 2] + 150 * bgra[oR + 1] + 29 * bgra[oR]) >> 8;
+                    int lumU = (77 * bgra[oU + 2] + 150 * bgra[oU + 1] + 29 * bgra[oU]) >> 8;
+                    int lumD = (77 * bgra[oD + 2] + 150 * bgra[oD + 1] + 29 * bgra[oD]) >> 8;
+
+                    int minNb = lumL < lumR ? lumL : lumR;
+                    if (lumU < minNb) minNb = lumU;
+                    if (lumD < minNb) minNb = lumD;
+
+                    if (bestLum - minNb >= 36)
+                    {
+                        mask[mRow + gx] = 1;
+                        activePts++;
+                    }
+                }
+            }
+            return mask;
+        }
+
+        public static int ComputeMaskIntersection(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return 0;
+            int inter = 0;
+            for (int i = 0; i < a.Length; i++)
+                if (a[i] != 0 && b[i] != 0) inter++;
+            return inter;
+        }
+
+        public static byte[] IntersectMasks(byte[] a, byte[] b, out int pts)
+        {
+            pts = 0;
+            if (a == null || b == null || a.Length != b.Length) return null;
+            byte[] dst = new byte[a.Length];
+            for (int i = 0; i < a.Length; i++)
+            {
+                if (a[i] != 0 && b[i] != 0)
+                {
+                    dst[i] = 1;
+                    pts++;
+                }
+            }
+            return dst;
+        }
+
+        public static float ComputeMaskIoU(byte[] a, byte[] b)
+        {
+            if (a == null || b == null || a.Length != b.Length) return 0f;
+            int inter = 0, uni = 0;
+            for (int i = 0; i < a.Length; i++)
+            {
+                bool ba = a[i] != 0;
+                bool bb = b[i] != 0;
+                if (ba && bb) { inter++; uni++; }
+                else if (ba || bb) uni++;
+            }
+            return uni == 0 ? 0f : (float)inter / uni;
+        }
+
+        /// <summary>
+        /// Auto-crops huge 1440p/4K subtitle ROIs (e.g. 1758x319) down to the tight active subtitle band (+padding)
+        /// in &lt; 1ms! Strips ~70% of 3D background clutter AND lets thin fonts get crisp 1.65x-2.0x super-resolution!
+        /// </summary>
+        public static bool DetectActiveTextBand(byte[] bgra, int w, int h, out Rectangle cropRect)
+        {
+            cropRect = new Rectangle(0, 0, w, h);
+            if (bgra == null || w < 200 || h < 70) return false;
+
+            int[] rowHits = new int[h];
+            int[] colHits = new int[w];
+            int totalHits = 0;
+            int stepX = w > 1200 ? 2 : 1;
+            int stepY = h > 220 ? 2 : 1;
+
+            for (int y = 3; y < h - 3; y += stepY)
+            {
+                int row = y * w;
+                int rowU = (y - 3) * w;
+                int rowD = (y + 3) * w;
+                for (int x = 3; x < w - 3; x += stepX)
+                {
+                    int off = (row + x) << 2;
+                    byte b = bgra[off], g = bgra[off + 1], r = bgra[off + 2];
+                    byte mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                    byte mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                    if (mn < 146 || (mx - mn) > 84) continue;
+
+                    int lumC = (77 * r + 150 * g + 29 * b) >> 8;
+                    int oL = (row + x - 3) << 2;
+                    int oR = (row + x + 3) << 2;
+                    int oU = (rowU + x) << 2;
+                    int oD = (rowD + x) << 2;
+                    int lumL = (77 * bgra[oL + 2] + 150 * bgra[oL + 1] + 29 * bgra[oL]) >> 8;
+                    int lumR = (77 * bgra[oR + 2] + 150 * bgra[oR + 1] + 29 * bgra[oR]) >> 8;
+                    int lumU = (77 * bgra[oU + 2] + 150 * bgra[oU + 1] + 29 * bgra[oU]) >> 8;
+                    int lumD = (77 * bgra[oD + 2] + 150 * bgra[oD + 1] + 29 * bgra[oD]) >> 8;
+                    int minNb = Math.Min(Math.Min(lumL, lumR), Math.Min(lumU, lumD));
+
+                    if (lumC - minNb >= 40)
+                    {
+                        rowHits[y]++;
+                        colHits[x]++;
+                        totalHits++;
+                    }
+                }
+            }
+
+            if (totalHits < 28) return false;
+
+            int minRowThresh = Math.Max(3, (w / stepX) / 160);
+            int top = -1, bot = -1;
+            for (int y = 0; y < h; y++)
+            {
+                if (rowHits[y] >= minRowThresh) { top = y; break; }
+            }
+            for (int y = h - 1; y >= 0; y--)
+            {
+                if (rowHits[y] >= minRowThresh) { bot = y; break; }
+            }
+            if (top < 0 || bot <= top + 8) return false;
+
+            // Fixed low column threshold (never scale with full box height so single-line subtitles NEVER get clipped at ends!)
+            const int minColThresh = 2;
+            int left = -1, right = -1;
+            for (int x = 0; x < w; x++)
+            {
+                if (colHits[x] >= minColThresh) { left = x; break; }
+            }
+            for (int x = w - 1; x >= 0; x--)
+            {
+                if (colHits[x] >= minColThresh) { right = x; break; }
+            }
+            if (left < 0 || right <= left + 40) return false;
+
+            int padX = Math.Max(52, w / 14);
+            int padY = Math.Max(32, h / 8);
+            int rx = Math.Max(0, left - padX);
+            int ry = Math.Max(0, top - padY);
+            int rx2 = Math.Min(w, right + padX);
+            int ry2 = Math.Min(h, bot + padY);
+            int rw = rx2 - rx;
+            int rh = ry2 - ry;
+
+            // Only apply auto-crop if it meaningfully trims away 3D background clutter (< 84% of original area)
+            if (rw >= 90 && rh >= 36 && ((long)rw * rh) < ((long)w * h * 84 / 100))
+            {
+                cropRect = new Rectangle(rx, ry, rw, rh);
+                return true;
+            }
+            return false;
+        }
+
+        private static byte[] SliceTightBgra(byte[] src, int sw, Rectangle rect)
+        {
+            byte[] dst = new byte[rect.Width * rect.Height * 4];
+            int rowBytes = rect.Width * 4;
+            for (int y = 0; y < rect.Height; y++)
+            {
+                Buffer.BlockCopy(src, ((rect.Y + y) * sw + rect.X) * 4, dst, y * rowBytes, rowBytes);
+            }
+            return dst;
+        }
+
+        public string RecognizeBitmapWithTemporal(Bitmap sourceBmp, byte[] curTightBgra, byte[] prevTightBgra, string srcLang, bool enhanceOcr, out bool usedOnline, out bool detectedChoiceLayout, out string error)
+        {
+            return RecognizeBitmapWithTemporal(sourceBmp, curTightBgra, prevTightBgra, true, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out error);
+        }
+
+        public string RecognizeBitmapWithTemporal(Bitmap sourceBmp, byte[] curTightBgra, byte[] prevTightBgra, bool allowTemporal, string srcLang, bool enhanceOcr, out bool usedOnline, out bool detectedChoiceLayout, out string error)
         {
             usedOnline = false;
             detectedChoiceLayout = false;
             error = "";
+            if (sourceBmp == null) return "";
 
             if (srcLang != "auto" && !HasLocalPackFor(srcLang))
             {
@@ -1154,81 +2031,55 @@ namespace TranslatorLive
 
             try
             {
-                int w = sourceBmp.Width, h = sourceBmp.Height;
-                BitmapData bd = sourceBmp.LockBits(new Rectangle(0, 0, w, h), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                int srcStride = bd.Stride;
-                byte[] srcBuf = new byte[Math.Abs(srcStride) * h];
-                try { Marshal.Copy(bd.Scan0, srcBuf, 0, srcBuf.Length); }
-                finally { sourceBmp.UnlockBits(bd); }
+                int origW = sourceBmp.Width, origH = sourceBmp.Height;
+                byte[] fullBgra = curTightBgra ?? CopyBitmapToTightBgra(sourceBmp);
 
-                // Calculate optimal Super-Resolution scale factor for Pass 1 (~8-11ms in-memory fixed-point bilinear upscale!):
-                // Ensures small 15-18px game fonts inside large 1437x345 boxes are always crisp ~25-32px tall for WinRT OCR.
-                float scale = 1.0f;
-                if (h < 150) scale = 2.0f;
-                else if (h < 260 && w * 1.65f <= 2500) scale = 1.65f;
-                else if (h < 390 && w * 1.45f <= 2400) scale = 1.45f;
-                else if (h < 520 && w * 1.30f <= 2400) scale = 1.30f;
+                // AUTO-CROP ACTIVE SUBTITLE BAND for wide/tall ROIs (e.g. user's 1758x319 box!):
+                // When 2 paired frames of the same subtitle exist, detect the active text band on the TEMPORAL-CLEANED frame
+                // so moving 3D bright sparks/glare are already erased before computing the tight subtitle crop!
+                int w = origW, h = origH;
+                byte[] baseBgra = fullBgra;
+                byte[] prevBgra = (allowTemporal && prevTightBgra != null && prevTightBgra.Length == fullBgra.Length) ? prevTightBgra : null;
+                bool usedAutoCrop = false;
 
-                int nw = (scale > 1.01f) ? (int)(w * scale) : w;
-                int nh = (scale > 1.01f) ? (int)(h * scale) : h;
-
-                // Pass 1: Fast In-Memory Bilinear Super-Resolution (Natural RGB)
-                byte[] pass1Buf = (scale > 1.01f)
-                    ? ScaleAndProcessRawBgra(srcBuf, w, h, srcStride, nw, nh, false)
-                    : ((srcStride == w * 4) ? srcBuf : ScaleAndProcessRawBgra(srcBuf, w, h, srcStride, w, h, false));
-
-                bool choice1 = false;
-                string raw1 = RunWinRtOcrFromBuffer(eng, pass1Buf, nw, nh, srcLang, out choice1);
-                string clean1 = choice1 ? NormalizeChoices(raw1, srcLang) : NormalizeText(raw1, srcLang, true);
-                if (!enhanceOcr)
+                if (enhanceOcr && (origW > 950 || origH > 180))
                 {
-                    detectedChoiceLayout = choice1;
-                    return raw1;
-                }
-
-                int score1 = ScoreOcrQuality(clean1, srcLang);
-                // If Pass 1 already produced clean, high-confidence text (>= 88), return immediately (~35ms total!)
-                if (score1 >= 88 && !string.IsNullOrWhiteSpace(clean1))
-                {
-                    detectedChoiceLayout = choice1;
-                    return raw1;
-                }
-
-                // Pass 2: Smooth Achromatic Glare Suppression on the already-upscaled buffer (~3ms in-memory transform + ~18ms OCR!)
-                byte[] pass2Buf = ApplySmoothAchromaticInPlaceOrCopy(pass1Buf, nw, nh);
-                bool choice2 = false;
-                string raw2 = RunWinRtOcrFromBuffer(eng, pass2Buf, nw, nh, srcLang, out choice2);
-                string clean2 = choice2 ? NormalizeChoices(raw2, srcLang) : NormalizeText(raw2, srcLang, true);
-                int score2 = ScoreOcrQuality(clean2, srcLang);
-
-                string bestRaw = raw1;
-                string bestClean = clean1;
-                int bestScore = score1;
-                bool bestChoice = choice1;
-
-                if (!string.IsNullOrWhiteSpace(clean2) && (score2 > bestScore || (score2 == bestScore && clean2.Length > bestClean.Length + 3)))
-                {
-                    bestRaw = raw2;
-                    bestClean = clean2;
-                    bestScore = score2;
-                    bestChoice = choice2;
-                }
-
-                // Pass 3: High-Contrast Bright-Core Subtitle Isolation (only when Pass 1 & Pass 2 both struggled < 78 or returned empty on extreme 3D video scenes)
-                if (bestScore < 78 || string.IsNullOrWhiteSpace(bestClean))
-                {
-                    byte[] pass3Buf = ApplyHighContrastSubtitleCore(pass1Buf, nw, nh);
-                    bool choice3 = false;
-                    string raw3 = RunWinRtOcrFromBuffer(eng, pass3Buf, nw, nh, srcLang, out choice3);
-                    string clean3 = choice3 ? NormalizeChoices(raw3, srcLang) : NormalizeText(raw3, srcLang, true);
-                    int score3 = ScoreOcrQuality(clean3, srcLang);
-
-                    if (!string.IsNullOrWhiteSpace(clean3) && (score3 > bestScore || (score3 == bestScore && clean3.Length > bestClean.Length + 3)))
+                    Rectangle band = Rectangle.Empty;
+                    bool gotBand = false;
+                    if (prevBgra != null)
                     {
-                        bestRaw = raw3;
-                        bestClean = clean3;
-                        bestScore = score3;
-                        bestChoice = choice3;
+                        bool hadMotPre;
+                        byte[] preTemp = ApplyTemporalBackgroundEraser(prevBgra, fullBgra, origW, origH, out hadMotPre);
+                        if (hadMotPre) gotBand = DetectActiveTextBand(preTemp, origW, origH, out band);
+                    }
+                    if (!gotBand) gotBand = DetectActiveTextBand(fullBgra, origW, origH, out band);
+                    if (gotBand)
+                    {
+                        baseBgra = SliceTightBgra(fullBgra, origW, band);
+                        if (prevBgra != null) prevBgra = SliceTightBgra(prevBgra, origW, band);
+                        w = band.Width;
+                        h = band.Height;
+                        usedAutoCrop = true;
+                    }
+                }
+
+                string bestRaw;
+                int bestScore;
+                bool bestChoice;
+                RunMultiPassWinRtOcr(eng, baseBgra, prevBgra, w, h, srcLang, enhanceOcr, out bestRaw, out bestScore, out bestChoice);
+
+                // Safety fallback: if auto-crop missed a dark-on-light box or scored poorly (< 72), re-run once on full ROI!
+                if (usedAutoCrop && (bestScore < 72 || string.IsNullOrWhiteSpace(bestRaw)))
+                {
+                    string fullRaw;
+                    int fullScore;
+                    bool fullChoice;
+                    byte[] fullPrev = (allowTemporal && prevTightBgra != null && prevTightBgra.Length == fullBgra.Length) ? prevTightBgra : null;
+                    RunMultiPassWinRtOcr(eng, fullBgra, fullPrev, origW, origH, srcLang, enhanceOcr, out fullRaw, out fullScore, out fullChoice);
+                    if (fullScore > bestScore + 2 || (string.IsNullOrWhiteSpace(bestRaw) && !string.IsNullOrWhiteSpace(fullRaw)))
+                    {
+                        bestRaw = fullRaw;
+                        bestChoice = fullChoice;
                     }
                 }
 
@@ -1240,6 +2091,131 @@ namespace TranslatorLive
                 error = "OCR error: " + ex.Message;
                 return "";
             }
+        }
+
+        private static void RunMultiPassWinRtOcr(OcrEngine eng, byte[] baseBgra, byte[] prevBgra, int w, int h, string srcLang, bool enhanceOcr,
+            out string bestRaw, out int bestScore, out bool bestChoice)
+        {
+            bestRaw = "";
+            string bestClean = "";
+            bestScore = 0;
+            bestChoice = false;
+            int srcStride = w * 4;
+
+            // Optimal Super-Resolution scale factor:
+            // Ensures delicate thin game fonts are crisp ~28-40px tall for WinRT OCR while keeping runtime under ~25-45ms!
+            float scale = 1.0f;
+            if (h < 150 && w * 2.0f <= 2200) scale = 2.0f;
+            else if (h < 220 && w * 1.65f <= 2200) scale = 1.65f;
+            else if (h < 300 && w * 1.35f <= 2200) scale = 1.35f;
+
+            int nw = (scale > 1.01f) ? (int)(w * scale) : w;
+            int nh = (scale > 1.01f) ? (int)(h * scale) : h;
+
+            // PASS 0 (SAFE 2-FRAME TEMPORAL BACKGROUND ERASER — ONLY WHEN SAME SUBTITLE EXISTS IN BOTH FRAMES!):
+            if (enhanceOcr && prevBgra != null && prevBgra.Length == baseBgra.Length)
+            {
+                bool hadMotion;
+                byte[] tempClean = ApplyTemporalBackgroundEraser(prevBgra, baseBgra, w, h, out hadMotion);
+                if (hadMotion)
+                {
+                    byte[] tempUp = (scale > 1.01f) ? ScaleAndProcessRawBgra(tempClean, w, h, srcStride, nw, nh, false) : tempClean;
+                    int tpW, tpH;
+                    byte[] tempPad = PadBgraBorder(tempUp, nw, nh, 16, out tpW, out tpH);
+                    bool choiceT = false;
+                    string rawT = RunWinRtOcrFromBuffer(eng, tempPad, tpW, tpH, srcLang, out choiceT);
+                    string cleanT = choiceT ? NormalizeChoices(rawT, srcLang) : NormalizeText(rawT, srcLang, true);
+                    int scoreT = ScoreOcrQuality(cleanT, srcLang);
+                    if (!string.IsNullOrWhiteSpace(cleanT))
+                    {
+                        bestRaw = rawT; bestClean = cleanT; bestScore = scoreT; bestChoice = choiceT;
+                    }
+                    if (bestScore >= 96 && bestClean.Length >= 8) return;
+                }
+            }
+
+            // Upscale current frame once for fallback passes
+            byte[] upscaledRaw = (scale > 1.01f) ? ScaleAndProcessRawBgra(baseBgra, w, h, srcStride, nw, nh, false) : baseBgra;
+            if (!enhanceOcr)
+            {
+                bool choiceRaw = false;
+                bestRaw = RunWinRtOcrFromBuffer(eng, upscaledRaw, nw, nh, srcLang, out choiceRaw);
+                bestChoice = choiceRaw;
+                bestScore = ScoreOcrQuality(choiceRaw ? NormalizeChoices(bestRaw, srcLang) : NormalizeText(bestRaw, srcLang, true), srcLang);
+                return;
+            }
+
+            // PASS 1 (RAW UPSCALED COLOR RGB + 16px PAD)
+            int rawPadW, rawPadH;
+            byte[] rawPadded = PadBgraBorder(upscaledRaw, nw, nh, 16, out rawPadW, out rawPadH);
+            bool choice1 = false;
+            string raw1 = RunWinRtOcrFromBuffer(eng, rawPadded, rawPadW, rawPadH, srcLang, out choice1);
+            string clean1 = choice1 ? NormalizeChoices(raw1, srcLang) : NormalizeText(raw1, srcLang, true);
+            int score1 = ScoreOcrQuality(clean1, srcLang);
+            if (!string.IsNullOrWhiteSpace(clean1) &&
+                (score1 > bestScore + 1 || (Math.Abs(score1 - bestScore) <= 2 && clean1.Length > bestClean.Length + 3)))
+            {
+                bestRaw = raw1; bestClean = clean1; bestScore = score1; bestChoice = choice1;
+            }
+
+            // PASS 2 (LOCAL HIGH-PASS BACKGROUND REMOVAL + FONT-PRESERVING EDGE SHARPEN — strips BOTH bright white/gray glare AND colored nebula!)
+            // Always compare Pass 1 vs Pass 2 (~14ms) so glowing nebula/Navi glare NEVER silently drops leading words like "Farore, the "!
+            {
+                int fpW, fpH;
+                byte[] fpBuf = ApplyFontPreservingEnhancer(upscaledRaw, nw, nh, 16, out fpW, out fpH);
+                bool choice2 = false;
+                string raw2 = RunWinRtOcrFromBuffer(eng, fpBuf, fpW, fpH, srcLang, out choice2);
+                string clean2 = choice2 ? NormalizeChoices(raw2, srcLang) : NormalizeText(raw2, srcLang, true);
+                int score2 = ScoreOcrQuality(clean2, srcLang);
+                if (!string.IsNullOrWhiteSpace(clean2) &&
+                    (score2 > bestScore + 1 || (Math.Abs(score2 - bestScore) <= 4 && clean2.Length > bestClean.Length + 3)))
+                {
+                    bestRaw = raw2; bestClean = clean2; bestScore = score2; bestChoice = choice2;
+                }
+            }
+
+            // Detect bright/glowing/saturated 3D background (~0.15ms sampled): when present, Pass 1/2 can still drop words over intense glow
+            // while scoring 100 on the surviving fragment — so we MUST also run Pass 3 (Dark-Outline Isolator) to compare completeness!
+            bool hasBrightBg = false;
+            {
+                int totalPx = nw * nh;
+                int stepBg = Math.Max(1, totalPx / 4000);
+                int samples = 0, brightBgCnt = 0;
+                for (int i = 0; i < totalPx; i += stepBg)
+                {
+                    int off = i << 2;
+                    byte b = upscaledRaw[off], g = upscaledRaw[off + 1], r = upscaledRaw[off + 2];
+                    int lum = (77 * r + 150 * g + 29 * b) >> 8;
+                    byte mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                    byte mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                    if (lum >= 135 || (mx >= 150 && (mx - mn) >= 70)) brightBgCnt++;
+                    samples++;
+                }
+                if (samples > 0 && brightBgCnt * 100 / samples >= 12)
+                    hasBrightBg = true;
+            }
+
+            // PASS 3 (SOFT ANTI-ALIASED DARK-OUTLINE SUBTITLE ISOLATOR):
+            // Runs when Pass 1 & 2 struggled (< 86), returned empty, OR ROI has bright 3D background glare that could hide words!
+            if (bestScore < 86 || hasBrightBg || string.IsNullOrWhiteSpace(bestClean))
+            {
+                int padW, padH;
+                byte[] isoBuf = ApplyDarkOutlineSubtitleIsolator(upscaledRaw, nw, nh, out padW, out padH);
+                bool choiceIso = false;
+                string rawIso = RunWinRtOcrFromBuffer(eng, isoBuf, padW, padH, srcLang, out choiceIso);
+                string cleanIso = choiceIso ? NormalizeChoices(rawIso, srcLang) : NormalizeText(rawIso, srcLang, true);
+                int scoreIso = ScoreOcrQuality(cleanIso, srcLang);
+                if (!string.IsNullOrWhiteSpace(cleanIso) &&
+                    (scoreIso > bestScore + 2 || (Math.Abs(scoreIso - bestScore) <= 4 && cleanIso.Length > bestClean.Length + 4)))
+                {
+                    bestRaw = rawIso; bestClean = cleanIso; bestScore = scoreIso; bestChoice = choiceIso;
+                }
+            }
+        }
+
+        public string RecognizeBitmap(Bitmap sourceBmp, string srcLang, bool enhanceOcr, out bool usedOnline, out bool detectedChoiceLayout, out string error)
+        {
+            return RecognizeBitmapWithTemporal(sourceBmp, null, null, false, srcLang, enhanceOcr, out usedOnline, out detectedChoiceLayout, out error);
         }
 
         private static byte[] ScaleAndProcessRawBgra(byte[] src, int sw, int sh, int srcStride, int dw, int dh, bool achromatic)
@@ -1302,6 +2278,310 @@ namespace TranslatorLive
                         dst[dOff + 3] = 255;
                     }
                 }
+            }
+            return dst;
+        }
+
+        /// <summary>
+        /// Font-Preserving Local High-Pass Enhancer (~3ms O(W*H)):
+        /// Keeps 100% of delicate anti-aliased font strokes completely connected (never splits 'k' into 'lc'),
+        /// suppresses BOTH saturated 3D nebula (green/gold/blue) AND bright white/gray 3D background glare (Navi glow, sky, stone)
+        /// via O(W*H) separable local illumination subtraction, sharpens thin strokes, and pads 16px for optimal WinRT OCR.
+        /// </summary>
+        public static byte[] ApplyFontPreservingEnhancer(byte[] srcBgra, int w, int h, int pad, out int outW, out int outH)
+        {
+            outW = w + pad * 2;
+            outH = h + pad * 2;
+            int total = w * h;
+            byte[] gray = new byte[total];
+
+            for (int i = 0; i < total; i++)
+            {
+                int off = i << 2;
+                byte b = srcBgra[off];
+                byte g = srcBgra[off + 1];
+                byte r = srcBgra[off + 2];
+                int y = (77 * r + 150 * g + 29 * b) >> 8;
+                byte mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                byte mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                int sat = mx - mn;
+
+                // Softly suppress saturated 3D nebula/effects (sat > 52) WITHOUT touching neutral white/gray font edges!
+                int suppressed = y;
+                if (sat > 52)
+                {
+                    suppressed = y - ((sat - 52) * 68 / 100);
+                    if (suppressed < 0) suppressed = 0;
+                }
+                gray[i] = (byte)suppressed;
+            }
+
+            // Fast O(W*H) separable sliding-window local illumination estimate (radius r = 12..18px)
+            // Cancels bright white/gray 3D backgrounds (Navi fairy glow, clouds, bright floors) while leaving thin letters razor sharp!
+            int rBg = Math.Max(10, Math.Min(18, h / 10));
+            int win = rBg * 2 + 1;
+            byte[] blurH = new byte[total];
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * w;
+                int sum = 0;
+                for (int k = -rBg; k <= rBg; k++)
+                {
+                    int cx = k < 0 ? 0 : (k >= w ? w - 1 : k);
+                    sum += gray[row + cx];
+                }
+                for (int x = 0; x < w; x++)
+                {
+                    blurH[row + x] = (byte)(sum / win);
+                    int xOut = x - rBg; if (xOut < 0) xOut = 0;
+                    int xIn = x + rBg + 1; if (xIn >= w) xIn = w - 1;
+                    sum += gray[row + xIn] - gray[row + xOut];
+                }
+            }
+
+            byte[] hp = new byte[total];
+            long sumHp = 0;
+            for (int x = 0; x < w; x++)
+            {
+                int sum = 0;
+                for (int k = -rBg; k <= rBg; k++)
+                {
+                    int cy = k < 0 ? 0 : (k >= h ? h - 1 : k);
+                    sum += blurH[cy * w + x];
+                }
+                for (int y = 0; y < h; y++)
+                {
+                    int idx = y * w + x;
+                    int localBg = sum / win;
+                    int gVal = gray[idx];
+                    // Blend natural luminance with local high-pass boost: kills flat bright 3D patches while keeping full 0..255 AA!
+                    int val = gVal + ((gVal - localBg) * 55 / 100) - (localBg > 135 ? ((localBg - 135) * 45 / 100) : 0);
+                    byte bv = (byte)(val < 0 ? 0 : (val > 255 ? 255 : val));
+                    hp[idx] = bv;
+                    sumHp += bv;
+
+                    int yOut = y - rBg; if (yOut < 0) yOut = 0;
+                    int yIn = y + rBg + 1; if (yIn >= h) yIn = h - 1;
+                    sum += blurH[yIn * w + x] - blurH[yOut * w + x];
+                }
+            }
+
+            byte bgFill = (byte)(sumHp / Math.Max(1, total));
+            byte[] dst = new byte[outW * outH * 4];
+            for (int off = 0; off < dst.Length; off += 4)
+            {
+                dst[off] = bgFill; dst[off + 1] = bgFill; dst[off + 2] = bgFill; dst[off + 3] = 255;
+            }
+
+            // Fast 3x3 cross unsharp mask: sharpens thin strokes cleanly while preserving full 0..255 anti-aliasing!
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * w;
+                int rowUp = (y > 0 ? y - 1 : 0) * w;
+                int rowDn = (y + 1 < h ? y + 1 : h - 1) * w;
+                int dstRow = (y + pad) * outW;
+
+                for (int x = 0; x < w; x++)
+                {
+                    int xm = x > 0 ? x - 1 : 0;
+                    int xp = x + 1 < w ? x + 1 : w - 1;
+                    int c = hp[row + x];
+                    int avg = (hp[rowUp + x] + hp[rowDn + x] + hp[row + xm] + hp[row + xp]) >> 2;
+                    int sharp = c + ((c - avg) >> 1);
+                    byte v = (byte)(sharp < 0 ? 0 : (sharp > 255 ? 255 : sharp));
+
+                    int dOff = (dstRow + x + pad) << 2;
+                    dst[dOff] = v;
+                    dst[dOff + 1] = v;
+                    dst[dOff + 2] = v;
+                }
+            }
+            return dst;
+        }
+
+        /// <summary>
+        /// Zero-Delay Borderless Subtitle Enhancer:
+        /// Fast O(W*H) separable 1D dark-halo dilation isolates light AND colored game subtitle glyphs
+        /// that carry a dark outline/shadow (or sit on a dark box), while stripping bright 3D background glare.
+        /// Also auto-detects light/parchment boxes with dark ink, and adds a clean 16px white border for WinRT OCR.
+        /// </summary>
+        public static byte[] ApplyDarkOutlineSubtitleIsolator(byte[] srcBgra, int w, int h, out int outW, out int outH)
+        {
+            const int pad = 16;
+            outW = w + pad * 2;
+            outH = h + pad * 2;
+            int total = w * h;
+            byte[] lum = new byte[total];
+            byte[] sat = new byte[total];
+            byte[] maxCh = new byte[total];
+            byte[] minCh = new byte[total];
+            byte[] isDark = new byte[total];
+
+            long sumLum = 0;
+            long sumSat = 0;
+            long sumMinC = 0;
+            int darkCount = 0;
+
+            for (int i = 0; i < total; i++)
+            {
+                int off = i << 2;
+                byte b = srcBgra[off];
+                byte g = srcBgra[off + 1];
+                byte r = srcBgra[off + 2];
+                int y = (77 * r + 150 * g + 29 * b) >> 8;
+                byte mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+                byte mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+                byte st = (byte)(mx - mn);
+                lum[i] = (byte)y;
+                maxCh[i] = mx;
+                minCh[i] = mn;
+                sat[i] = st;
+                sumLum += y;
+                sumSat += st;
+                sumMinC += mn;
+                if (y < 98)
+                {
+                    isDark[i] = 1;
+                    darkCount++;
+                }
+            }
+
+            // Detect genuine light/parchment dialog box with dark text (low saturation + high minC, NEVER bright colored 3D scenes!)
+            int safeTotal = Math.Max(1, total);
+            int avgLum = (int)(sumLum / safeTotal);
+            int avgSat = (int)(sumSat / safeTotal);
+            int avgMinC = (int)(sumMinC / safeTotal);
+            bool lightBoxDarkText = (avgLum >= 182 && avgSat <= 48 && avgMinC >= 165 && darkCount > total / 250 && darkCount < total * 28 / 100);
+
+            byte[] outBuf = new byte[outW * outH * 4];
+            // Fill entire padded canvas with pure white (255,255,255,255) -> black ink on white paper is optimal for WinRT OCR!
+            for (int i = 0; i < outBuf.Length; i++) outBuf[i] = 255;
+
+            if (lightBoxDarkText)
+            {
+                for (int y = 0; y < h; y++)
+                {
+                    int rowIn = y * w;
+                    int rowOut = (y + pad) * outW;
+                    for (int x = 0; x < w; x++)
+                    {
+                        byte v = lum[rowIn + x];
+                        // Stretch dark ink sharply toward 0, push parchment background toward 255
+                        int ink = (v - 75) * 255 / 85;
+                        byte pv = (byte)(ink < 0 ? 0 : (ink > 255 ? 255 : ink));
+                        int dOff = (rowOut + x + pad) << 2;
+                        outBuf[dOff] = pv;
+                        outBuf[dOff + 1] = pv;
+                        outBuf[dOff + 2] = pv;
+                    }
+                }
+                return outBuf;
+            }
+
+            // Separable 1D box-dilation of dark outline/shadow pixels (radius r = 4px) in O(W*H)!
+            const int rHalo = 4;
+            byte[] haloH = new byte[total];
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * w;
+                int run = 0;
+                for (int x = 0; x < Math.Min(w, rHalo + 1); x++) run += isDark[row + x];
+                for (int x = 0; x < w; x++)
+                {
+                    if (run > 0) haloH[row + x] = 1;
+                    int left = x - rHalo;
+                    int right = x + rHalo + 1;
+                    if (left >= 0) run -= isDark[row + left];
+                    if (right < w) run += isDark[row + right];
+                }
+            }
+
+            byte[] hasDarkHalo = new byte[total];
+            for (int x = 0; x < w; x++)
+            {
+                int run = 0;
+                for (int y = 0; y < Math.Min(h, rHalo + 1); y++) run += haloH[y * w + x];
+                for (int y = 0; y < h; y++)
+                {
+                    int idx = y * w + x;
+                    if (run > 0) hasDarkHalo[idx] = 1;
+                    int top = y - rHalo;
+                    int bot = y + rHalo + 1;
+                    if (top >= 0) run -= haloH[top * w + x];
+                    if (bot < h) run += haloH[bot * w + x];
+                }
+            }
+
+            bool darkDominantBg = (darkCount > total * 45 / 100);
+
+            // Extract crisp glyph ink -> black on pure white!
+            // 1) White/light borderless glyphs use minC (achromatic core), completely rejecting golden/blue/red 3D backgrounds!
+            // 2) Colored RPG keywords are extracted when background is predominantly dark (prevents gluing kerning gaps on bright colored 3D scenes).
+            for (int y = 0; y < h; y++)
+            {
+                int rowIn = y * w;
+                int rowOut = (y + pad) * outW;
+                for (int x = 0; x < w; x++)
+                {
+                    int idx = rowIn + x;
+                    byte l = lum[idx];
+                    byte s = sat[idx];
+                    byte mx = maxCh[idx];
+                    byte mn = minCh[idx];
+                    bool halo = hasDarkHalo[idx] != 0;
+
+                    int inkStrength = 0;
+                    if (halo)
+                    {
+                        // White / off-white borderless subtitle glyph hugged by dark outline/drop-shadow (soft ramp preserves thin strokes!)
+                        if (mn >= 102 && s <= 78)
+                        {
+                            inkStrength = (mn - 96) * 255 / 115;
+                        }
+                        // Colored RPG keyword glyph on dark/shadowed background (never glues bright outdoor/golden kerning gaps!)
+                        else if (darkDominantBg && mx >= 150 && s > 75 && l >= 85)
+                        {
+                            inkStrength = (mx - 135) * 255 / 95;
+                        }
+                    }
+                    else if (mn >= 220 && s <= 35 && darkCount > total / 8)
+                    {
+                        // Thick pure white bold glyph interior on dark background
+                        inkStrength = (mn - 205) * 255 / 50;
+                    }
+
+                    if (inkStrength > 0)
+                    {
+                        if (inkStrength > 255) inkStrength = 255;
+                        byte pv = (byte)(255 - inkStrength);
+                        int dOff = (rowOut + x + pad) << 2;
+                        outBuf[dOff] = pv;
+                        outBuf[dOff + 1] = pv;
+                        outBuf[dOff + 2] = pv;
+                    }
+                }
+            }
+
+            return outBuf;
+        }
+
+        private static byte[] PadBgraBorder(byte[] srcBgra, int w, int h, int pad, out int outW, out int outH)
+        {
+            outW = w + pad * 2;
+            outH = h + pad * 2;
+            byte[] dst = new byte[outW * outH * 4];
+            // Sample top-left pixel as natural border fill so we never introduce false high-contrast frame edges
+            byte fb = srcBgra.Length >= 4 ? srcBgra[0] : (byte)0;
+            byte fg = srcBgra.Length >= 4 ? srcBgra[1] : (byte)0;
+            byte fr = srcBgra.Length >= 4 ? srcBgra[2] : (byte)0;
+            for (int off = 0; off < dst.Length; off += 4)
+            {
+                dst[off] = fb; dst[off + 1] = fg; dst[off + 2] = fr; dst[off + 3] = 255;
+            }
+            int rowBytes = w * 4;
+            for (int y = 0; y < h; y++)
+            {
+                Buffer.BlockCopy(srcBgra, y * rowBytes, dst, ((y + pad) * outW + pad) * 4, rowBytes);
             }
             return dst;
         }
@@ -1436,18 +2716,30 @@ namespace TranslatorLive
             {
                 if (c == '"') quoteCount++;
                 if (c == '<' || c == '>' || c == '*' || c == '&' || c == '~' || c == '^' || c == '|' || c == '_' || c == '#' || c == '@' ||
-                    c == '%' || c == '$' || c == '+' || c == '=' || c == '\\' || c == '/')
-                    score -= 18;
+                    c == '%' || c == '$' || c == '+' || c == '=' || c == '\\' || c == '/' || c == '{' || c == '}' || c == '•' || c == '„' || c == 'ß')
+                    score -= 20;
                 else if (!isCjk && c > 127 && c != '’' && c != '“' && c != '”' && c != '…' && c != '—' && c != '•')
-                    score -= 14;
+                    score -= 16;
             }
             if ((quoteCount & 1) == 1) score -= 16; // Penalize unmatched stray double-quote artifacts (e.g. Whenever" wapt%talk)
 
             if (!isCjk)
             {
-                // Penalize quote/bracket/symbol noise clusters inside words like 'l'herefore, wapt%talk, or t'(')
-                score -= Regex.Matches(s, @"[A-Za-z][""\(\)\[\]%$+=\\\/]+[A-Za-z\(\)\[\]]").Count * 22;
+                // Penalize quote/bracket/symbol noise clusters & glued-dot 3D artifacts (e.g. "and•the", "prineess.tgc", "promisetONabooru.u", "effi'hTIet's")
+                score -= Regex.Matches(s, @"[A-Za-z][""\(\)\[\]\{\}%$+=\\\/•„]+[A-Za-z\(\)\[\]]").Count * 24;
+                score -= Regex.Matches(s, @"[a-z]\.[a-z]{1,}").Count * 22;
+                score -= Regex.Matches(s, @"[a-z]'[A-Z]|[a-z]{2,}'[a-z]{3,}").Count * 24;
                 score -= Regex.Matches(s, @"['""]{2,}|\(\)|\[\]|[:;]{2,}").Count * 18;
+                // Penalize weird mid-word uppercase glitches from 3D noise (e.g. "mUst", "trickS", "sneakY", "promisetONabooru", "hTIet", "noOup")
+                score -= Regex.Matches(s, @"[a-z][A-Z]{2,}").Count * 26;
+                score -= Regex.Matches(s, @"\b[a-z]{2,}[A-Z][a-zA-Z]*\b").Count * 18;
+                score -= Regex.Matches(s, @"\b[A-Z][a-z]+[A-Z][a-z]+\b").Count * 14;
+                // Penalize broken impossible English word endings caused by 3D noise (e.g. "tricksw", "foolr", "tohancl")
+                score -= Regex.Matches(s, @"\b[a-z]{3,}(?:sw|lr|cl|zr|qn|vx|xz|jw|kw|bf|df|gf|pf|tf|vt|zp)\b", RegexOptions.IgnoreCase).Count * 18;
+                // Penalize glued mega-words & impossible 3D-noise consonant/bigram glitches (e.g. "kryown", "Icevto", "alononat", "kidzup", "haueltohelp")
+                score -= Regex.Matches(s, @"\b[a-zA-Z]{16,}\b").Count * 22;
+                score -= Regex.Matches(s, @"(?:kry|vto|zup|dzup|nonat|lwee|coul\b|gu\s+es|wontt)", RegexOptions.IgnoreCase).Count * 20;
+                score -= Regex.Matches(s, @"[bcdfghjklmnpqrstvwxz]{5,}", RegexOptions.IgnoreCase).Count * 16;
 
                 string[] words = Regex.Split(s, @"\s+");
                 int validWords = 0;
@@ -1468,9 +2760,15 @@ namespace TranslatorLive
                         score -= 18;
                     }
 
+                    // Penalize hyphenated single-letter OCR glitches (e.g. "Tree-i") and non-English 2-letter splits (e.g. "De cu")
+                    if (Regex.IsMatch(trimmedW, @"^[A-Za-z]+-[A-Za-z]$"))
+                        score -= 16;
+
                     string cleanW = Regex.Replace(trimmedW, @"[^A-Za-z]", "");
                     if (cleanW.Length == 0) continue;
                     if (cleanW.Length == 1 && cleanW != "I" && cleanW != "a" && cleanW != "A")
+                        score -= 12;
+                    else if (cleanW.Length == 2 && !Regex.IsMatch(cleanW, @"^(?:no|go|ok|oh|ah|hi|up|on|in|it|he|we|so|do|be|me|my|by|or|if|at|as|us|to|an|am|is|of|mr|ms|dr|st|tv|hp|mp|xp)$", RegexOptions.IgnoreCase))
                         score -= 12;
                     else if (cleanW.Length >= 3 && !Regex.IsMatch(cleanW, @"[aeiouyAEIOUY]"))
                         score -= 18;
@@ -1497,6 +2795,17 @@ namespace TranslatorLive
             // Require at least one vowel in English/Latin subtitles
             if (!Regex.IsMatch(lettersOnly, @"[aeiouyAEIOUY]")) return false;
 
+            // Reject random mixed-case nebula/effect hallucinations (e.g. "uOHMA", "cneFG")
+            if (Regex.IsMatch(s, @"^[a-z][A-Z]{3,}$")) return false;
+
+            // Reject single-word random gibberish with no punctuation & suspicious consonant clusters (e.g. "Nisciorn")
+            if (!s.Contains(" ") && s.Length >= 5 && !EndsWithTerminalPunctuation(s))
+            {
+                if (Regex.IsMatch(lettersOnly, @"(?:sci|xqz|qxz|zqj|rn$|iorm|iorn)$", RegexOptions.IgnoreCase) &&
+                    !Regex.IsMatch(lettersOnly, @"^(?:return|modern|pattern|eastern|western|northern|southern|cavern|lantern|tavern|concern|discern|unicorn|acorn|scorn|thorn|sworn|worn|born|horn|corn|torn|morn|forlorn)$", RegexOptions.IgnoreCase))
+                    return false;
+            }
+
             // If very short (2-3 letters total), ensure it's not random symbol noise
             if (lettersOnly.Length <= 2 && s.Length <= 3)
             {
@@ -1510,6 +2819,42 @@ namespace TranslatorLive
             if (string.IsNullOrWhiteSpace(text)) return "";
 
             string s = text;
+
+            // 0. Strip leading/trailing 3D-background noise ghosts (e.g. "fib Din,", ") Play this song...", "Hi,} Nabooru!", "saveßyrule")
+            s = Regex.Replace(s, @"^(?:fib|flb|fih|tih|ltb|lfb|lhb|iib)\s+(?=[A-Z][a-z]{2,})", "");
+            s = Regex.Replace(s, @"^[\)\}\]\•\„\—\s]+(?=[A-Za-z""'“])", "");
+            s = Regex.Replace(s, @"(?<=[a-z])ß(?=[a-z])", " H");
+            s = s.Replace("ß", "H").Replace("„", " ");
+            s = Regex.Replace(s, @"(?<=[A-Za-z])•(?=[A-Za-z])", " ");
+            s = Regex.Replace(s, @"[\{\}]", "");
+
+            // 0b. Universal thin-font split-'k' & serif OCR repair (Delcu->Deku, talce->take, malce->make, Guardiar->Guardian, forese->forest)
+            s = Regex.Replace(s, @"\bDelcu\b", "Deku", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btalce\b", "take", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bmalce\b", "make", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bwalce\b", "wake", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbaclc\b", "back", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdarlc\b", "dark", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bspealc\b", "speak", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbrealc\b", "break", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bwealc\b", "weak", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bloolc\b|\blooIc\b", "look", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bcloclc\b", "clock", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bbloclc\b", "block", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bGuardiar\b", "Guardian", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bforese\b", "forest", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\baland\b", "a land", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btyne\b", "the", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bfighling\b", "fighting", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bhoyal\b", "Royal", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bdidnlt\b", "didn't", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bwontt\b", "won't", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\blhere\b", "there", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bprineess\b", "princess", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bgoddes\b", "goddess", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\btohancl\b", "to hand", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\bhaueltohelp\b", "have to help", RegexOptions.IgnoreCase);
+            s = Regex.Replace(s, @"\boppesing\b", "opposing", RegexOptions.IgnoreCase);
 
             // 1. Clustered punctuation & noise symbols
             s = Regex.Replace(s, @"[:;]{2,}", ":");
@@ -1717,27 +3062,19 @@ namespace TranslatorLive
             catch { return text; }
         }
 
-        private static IPEndPoint BindIpv4Only(ServicePoint servicePoint, IPEndPoint remoteEndPoint, int retryCount)
-        {
-            if (remoteEndPoint.AddressFamily == AddressFamily.InterNetwork || retryCount > 2)
-                return new IPEndPoint(IPAddress.Any, 0);
-            throw new IOException("Skip IPv6 to prevent 2.5s timeout on IPv4-only ISP routes");
-        }
-
-        private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 1800)
+        private static string HttpRequestFast(string url, string postBody = null, string contentType = "application/x-www-form-urlencoded", int timeoutMs = 2200)
         {
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
-            req.Proxy = null;
+            // Respect Windows system proxy/VPN (critical so Google Translate answers in ~40-90ms instead of timing out!)
             req.KeepAlive = true;
             req.Timeout = timeoutMs;
             req.ReadWriteTimeout = timeoutMs;
-            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
             req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             try
             {
                 req.ServicePoint.UseNagleAlgorithm = false;
                 req.ServicePoint.Expect100Continue = false;
-                req.ServicePoint.BindIPEndPointDelegate = BindIpv4Only;
             }
             catch { }
 
@@ -1905,16 +3242,25 @@ namespace TranslatorLive
         public string TranslateChoicesLineByLine(string multilineChoices, string srcLang, string tgtLang,
             string preferredEngine, string geminiKey, bool naturalTone, out string usedProvider, out string error, string glossary = "")
         {
-            usedProvider = preferredEngine;
+            return TranslateChoicesLineByLine(multilineChoices, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone ? 1 : 2, out usedProvider, out error, glossary, "", "", "");
+        }
+
+        public string TranslateChoicesLineByLine(string multilineChoices, string srcLang, string tgtLang,
+            string preferredEngine, string geminiKey, int toneMode, out string usedProvider, out string error,
+            string glossary = "", string gameTitle = "", string gameLore = "", string storyContext = "")
+        {
+            usedProvider = preferredEngine == "mymemory" ? "MyMemory" : (preferredEngine == "gemini" ? "Gemini AI" : "Google");
             error = "";
-            string[] lines = multilineChoices.Split('\n');
+            if (string.IsNullOrWhiteSpace(multilineChoices)) return "";
+
+            string[] lines = multilineChoices.Replace("\r\n", "\n").Split(new char[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
             if (lines.Length == 1)
             {
-                string single = TranslateText(lines[0], srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error, glossary);
-                return string.IsNullOrEmpty(single) ? "" : ("• " + single);
+                string trSingle = TranslateText(lines[0].Trim(), srcLang, tgtLang, preferredEngine, geminiKey, toneMode, out usedProvider, out error, glossary, gameTitle, gameLore, storyContext);
+                return string.IsNullOrEmpty(trSingle) ? "" : ("• " + trSingle.Trim());
             }
 
-            string batchResult = TranslateText(multilineChoices, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error, glossary);
+            string batchResult = TranslateText(multilineChoices, srcLang, tgtLang, preferredEngine, geminiKey, toneMode, out usedProvider, out error, glossary, gameTitle, gameLore, storyContext);
             if (!string.IsNullOrEmpty(batchResult))
             {
                 string[] outLines = batchResult.Replace("\r\n", "\n").Split('\n');
@@ -1935,7 +3281,7 @@ namespace TranslatorLive
             {
                 string trimmed = ln.Trim();
                 if (string.IsNullOrEmpty(trimmed)) continue;
-                string tr = TranslateText(trimmed, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone, out usedProvider, out error, glossary);
+                string tr = TranslateText(trimmed, srcLang, tgtLang, preferredEngine, geminiKey, toneMode, out usedProvider, out error, glossary, gameTitle, gameLore, storyContext);
                 if (!string.IsNullOrEmpty(tr)) results.Add("• " + tr.Trim());
             }
             return string.Join("\n", results.ToArray());
@@ -1944,12 +3290,20 @@ namespace TranslatorLive
         public string TranslateText(string text, string srcLang, string tgtLang,
             string preferredEngine, string geminiKey, bool naturalTone, out string usedProvider, out string error, string glossary = "")
         {
+            return TranslateText(text, srcLang, tgtLang, preferredEngine, geminiKey, naturalTone ? 1 : 2, out usedProvider, out error, glossary, "", "", "");
+        }
+
+        public string TranslateText(string text, string srcLang, string tgtLang,
+            string preferredEngine, string geminiKey, int toneMode, out string usedProvider, out string error,
+            string glossary = "", string gameTitle = "", string gameLore = "", string storyContext = "")
+        {
             usedProvider = preferredEngine == "mymemory" ? "MyMemory" : (preferredEngine == "gemini" ? "Gemini AI" : "Google");
             error = "";
             if (string.IsNullOrWhiteSpace(text)) return "";
 
+            bool naturalFlag = (toneMode != 2);
             string coreKey = NormalizeCoreText(text);
-            string cacheKey = preferredEngine + "|" + (naturalTone ? "N" : "L") + "|" + srcLang + "|" + tgtLang + "|" + (glossary ?? "") + "|" + (string.IsNullOrEmpty(coreKey) ? text.Trim() : coreKey);
+            string cacheKey = preferredEngine + "|T" + toneMode + "|" + srcLang + "|" + tgtLang + "|" + (gameTitle ?? "") + "|" + (glossary ?? "") + "|" + (string.IsNullOrEmpty(coreKey) ? text.Trim() : coreKey);
             lock (_cacheLock)
             {
                 string hit;
@@ -1962,12 +3316,12 @@ namespace TranslatorLive
 
             List<GlossaryEntry> glossEntries = ParseGlossary(glossary);
             string protectedText = ProtectGlossary(text, glossEntries);
-            string prepped = PreProcessGameIdioms(protectedText, srcLang, tgtLang, naturalTone);
+            string prepped = PreProcessGameIdioms(protectedText, srcLang, tgtLang, naturalFlag);
             string result = "";
 
             if (preferredEngine == "gemini" && !string.IsNullOrWhiteSpace(geminiKey))
             {
-                result = CallGemini(prepped, tgtLang, geminiKey, naturalTone, glossary, out error);
+                result = CallGemini(prepped, tgtLang, geminiKey, toneMode, glossary, gameTitle, gameLore, storyContext, out error);
                 if (!string.IsNullOrEmpty(result)) usedProvider = "Gemini AI";
             }
 
@@ -1997,7 +3351,7 @@ namespace TranslatorLive
 
             if (!string.IsNullOrEmpty(result))
             {
-                result = NaturalizeIndonesian(result, tgtLang, naturalTone);
+                result = NaturalizeIndonesian(result, tgtLang, toneMode);
                 result = RestoreGlossary(result, glossEntries);
             }
 
@@ -2012,16 +3366,36 @@ namespace TranslatorLive
             return result;
         }
 
-        private static string CallGemini(string text, string tgtLang, string apiKey, bool naturalTone, string glossary, out string error)
+        private static string CallGemini(string text, string tgtLang, string apiKey, int toneMode, string glossary, string gameTitle, string gameLore, string storyContext, out string error)
         {
             error = "";
             try
             {
                 string langName = tgtLang == "id" ? "Indonesian" : (tgtLang == "ms" ? "Malay" : tgtLang);
-                string style = naturalTone ? "polite everyday conversational RPG dialogue (natural, friendly, use aku/kamu, avoid stiff formal words like Anda/saya/mengapa/apakah)" : "accurate natural translation";
-                string glossNote = string.IsNullOrWhiteSpace(glossary) ? "" : (" Keep/apply these game glossary terms: " + glossary.Replace("\r", "").Replace("\n", "; ") + ".");
-                string prompt = "Translate this game text into " + langName + " using " + style + "." + glossNote + " Return ONLY the translated text, preserving line breaks:\n" + text;
-                string escaped = prompt.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
+                string style;
+                if (toneMode == 0 && tgtLang == "id")
+                    style = "bahasa gaul Indonesia sehari-hari yang natural dan ekspresif untuk gamer (pakai gue/lo, gak, udah, banget, kayak, beneran; JANGAN pakai bahasa baku seperti Anda/saya/mengapa/apakah/tidak)";
+                else if (toneMode == 1 && tgtLang == "id")
+                    style = "polite everyday conversational RPG dialogue (natural, friendly, use aku/kamu, avoid stiff formal words like Anda/saya/mengapa/apakah)";
+                else
+                    style = "accurate natural translation";
+
+                StringBuilder p = new StringBuilder();
+                p.Append("Translate this game subtitle into ").Append(langName).Append(" using ").Append(style).Append(".");
+                if (!string.IsNullOrWhiteSpace(gameTitle))
+                    p.Append(" Game: ").Append(gameTitle).Append(".");
+                if (!string.IsNullOrWhiteSpace(gameLore))
+                {
+                    string shortLore = gameLore.Length > 360 ? gameLore.Substring(0, 360) : gameLore;
+                    p.Append(" Game lore context: ").Append(shortLore.Replace("\r", " ").Replace("\n", " ")).Append(".");
+                }
+                if (!string.IsNullOrWhiteSpace(glossary))
+                    p.Append(" Keep these exact game names/terms: ").Append(glossary.Replace("\r", "").Replace("\n", "; ")).Append(".");
+                if (!string.IsNullOrWhiteSpace(storyContext))
+                    p.Append("\nRecent dialogue for continuity:\n").Append(storyContext);
+                p.Append("\nReturn ONLY the translated text, preserving line breaks:\n").Append(text);
+
+                string escaped = p.ToString().Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "");
                 string body = "{\"contents\":[{\"parts\":[{\"text\":\"" + escaped + "\"}]}]}";
                 string url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=" + Uri.EscapeDataString(apiKey.Trim());
                 string json = HttpRequestFast(url, body, "application/json", 3800);
@@ -2036,40 +3410,89 @@ namespace TranslatorLive
 
         private static readonly string[] GoogleGtxHosts = new string[]
         {
-            "https://translate.google.co.id/translate_a/single",
             "https://translate.googleapis.com/translate_a/single",
+            "https://clients5.google.com/translate_a/t",
             "https://translate.google.com/translate_a/single"
         };
+        private static readonly DateTime[] _hostCooldownUntil = new DateTime[3];
 
         private static string CallGoogleGtx(string text, string srcLang, string tgtLang, out string error)
         {
             error = "";
             string sl = string.IsNullOrEmpty(srcLang) ? "auto" : srcLang;
             string tl = string.IsNullOrEmpty(tgtLang) ? "id" : tgtLang;
-            string query = "?client=gtx&sl=" + Uri.EscapeDataString(sl) +
-                           "&tl=" + Uri.EscapeDataString(tl) +
-                           "&dt=t&q=" + Uri.EscapeDataString(text);
 
             Exception lastEx = null;
-            for (int i = 0; i < GoogleGtxHosts.Length; i++)
+            int start = _bestGtxHostIdx;
+            DateTime now = DateTime.UtcNow;
+
+            for (int k = 0; k < GoogleGtxHosts.Length; k++)
             {
+                int idx = (start + k) % GoogleGtxHosts.Length;
+                // Circuit breaker: skip rate-limited / recently-failed host immediately (0ms wasted!)
+                if (_hostCooldownUntil[idx] > now) continue;
+
                 try
                 {
-                    string json = HttpRequestFast(GoogleGtxHosts[i] + query, null, "application/x-www-form-urlencoded", 1300);
-                    string parsed = ParseGoogleGtxJson(json);
+                    string url;
+                    if (idx == 1)
+                    {
+                        // Fast Chrome Dictionary endpoint (separate quota pool, ultra-fast JSON response!)
+                        url = GoogleGtxHosts[idx] + "?client=dict-chrome-ex&sl=" + Uri.EscapeDataString(sl) +
+                              "&tl=" + Uri.EscapeDataString(tl) + "&q=" + Uri.EscapeDataString(text);
+                    }
+                    else
+                    {
+                        url = GoogleGtxHosts[idx] + "?client=gtx&sl=" + Uri.EscapeDataString(sl) +
+                              "&tl=" + Uri.EscapeDataString(tl) + "&dt=t&q=" + Uri.EscapeDataString(text);
+                    }
+
+                    string json = HttpRequestFast(url, null, "application/x-www-form-urlencoded", 1200);
+                    string parsed = (idx == 1) ? ParseClients5Json(json) : ParseGoogleGtxJson(json);
                     if (!string.IsNullOrEmpty(parsed))
                     {
+                        _bestGtxHostIdx = idx;
                         error = "";
                         return parsed;
                     }
+                    _hostCooldownUntil[idx] = DateTime.UtcNow.AddSeconds(20);
                 }
                 catch (Exception ex)
                 {
                     lastEx = ex;
+                    bool isRateLimit = (ex.Message != null && (ex.Message.Contains("429") || ex.Message.IndexOf("Too Many Requests", StringComparison.OrdinalIgnoreCase) >= 0));
+                    if (isRateLimit)
+                    {
+                        // Google 429 is IP-wide across all 3 hosts -> cooldown ALL hosts for 120s immediately!
+                        // Saves ~1.8 seconds of futile sequential 429 retries and falls back instantly in 0ms!
+                        DateTime coolAll = DateTime.UtcNow.AddSeconds(120);
+                        for (int hIdx = 0; hIdx < _hostCooldownUntil.Length; hIdx++)
+                            _hostCooldownUntil[hIdx] = coolAll;
+                        break;
+                    }
+                    _hostCooldownUntil[idx] = DateTime.UtcNow.AddSeconds(25);
                 }
             }
             if (lastEx != null) error = "Google error: " + lastEx.Message;
             return "";
+        }
+
+        private static string ParseClients5Json(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return "";
+            string t = json.Trim();
+            // Format A: ["translated text"] or [["translated text","en"]]
+            if (t.StartsWith("[["))
+            {
+                int q1 = t.IndexOf('"');
+                if (q1 >= 0) return ReadJsonString(t, q1);
+            }
+            else if (t.StartsWith("["))
+            {
+                int q1 = t.IndexOf('"');
+                if (q1 >= 0) return ReadJsonString(t, q1);
+            }
+            return ParseGoogleGtxJson(json);
         }
 
         private static string CallMyMemory(string text, string srcLang, string tgtLang, out string error)

@@ -8,6 +8,21 @@ Add-Type -AssemblyName System.Drawing
 
 New-Item -ItemType Directory -Force -Path (Split-Path $OutIco -Parent) | Out-Null
 
+function New-RoundedRectPath([float]$x, [float]$y, [float]$w, [float]$h, [float]$rad) {
+    $p = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $d = [Math]::Min($rad * 2.0, [Math]::Min($w, $h))
+    if ($d -le 1.0) {
+        $p.AddRectangle((New-Object System.Drawing.RectangleF($x, $y, $w, $h)))
+        return $p
+    }
+    $p.AddArc($x, $y, $d, $d, 180, 90)
+    $p.AddArc($x + $w - $d, $y, $d, $d, 270, 90)
+    $p.AddArc($x + $w - $d, $y + $h - $d, $d, $d, 0, 90)
+    $p.AddArc($x, $y + $h - $d, $d, $d, 90, 90)
+    $p.CloseFigure()
+    return $p
+}
+
 function Render-IconBitmap([int]$size) {
     $bmp = New-Object System.Drawing.Bitmap($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -17,124 +32,97 @@ function Render-IconBitmap([int]$size) {
     $g.Clear([System.Drawing.Color]::Transparent)
 
     $s = [float]$size / 256.0
-    $pad = 14.0 * $s
+    $pad = 12.0 * $s
     $w = $size - ($pad * 2.0)
-    $rad = 54.0 * $s
+    $rad = 48.0 * $s
 
-    # Helper rounded rect path
-    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $d = $rad * 2.0
-    $path.AddArc($pad, $pad, $d, $d, 180, 90)
-    $path.AddArc($pad + $w - $d, $pad, $d, $d, 270, 90)
-    $path.AddArc($pad + $w - $d, $pad + $w - $d, $d, $d, 0, 90)
-    $path.AddArc($pad, $pad + $w - $d, $d, $d, 90, 90)
-    $path.CloseFigure()
-
-    # Soft drop shadow underneath
-    $shPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $shY = $pad + 6.0 * $s
-    $shPath.AddArc($pad, $shY, $d, $d, 180, 90)
-    $shPath.AddArc($pad + $w - $d, $shY, $d, $d, 270, 90)
-    $shPath.AddArc($pad + $w - $d, $shY + $w - $d, $d, $d, 0, 90)
-    $shPath.AddArc($pad, $shY + $w - $d, $d, $d, 90, 90)
-    $shPath.CloseFigure()
-    $shBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(65, 18, 12, 10))
+    # 1. Outer drop shadow
+    $shPath = New-RoundedRectPath $pad ($pad + 5.0 * $s) $w $w $rad
+    $shBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(90, 0, 0, 0))
     $g.FillPath($shBr, $shPath)
 
-    # Rich Warm Terracotta -> Deep Coral-Espresso Gradient (Claude-inspired flagship look)
-    $rectF = New-Object System.Drawing.RectangleF([float]$pad, [float]$pad, [float]$w, [float]$w)
-    $bgGrad = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-        $rectF,
-        [System.Drawing.Color]::FromArgb(255, 232, 130, 94),
-        [System.Drawing.Color]::FromArgb(255, 174, 71, 42),
-        [float]45.0
-    )
-    $g.FillPath($bgGrad, $path)
+    # 2. Matte Obsidian Tactical Shield Badge (#0E1014) — Zero AI-slop neon gradients!
+    $basePath = New-RoundedRectPath $pad $pad $w $w $rad
+    $baseBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 14, 16, 20))
+    $g.FillPath($baseBr, $basePath)
 
-    # Subtle radial top-left sheen
-    $sheenPath = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $sheenPath.AddEllipse([float]($pad - 20.0 * $s), [float]($pad - 30.0 * $s), [float](200.0 * $s), [float](160.0 * $s))
-    $g.SetClip($path)
-    $sheenBr = New-Object System.Drawing.Drawing2D.PathGradientBrush($sheenPath)
-    $sheenBr.CenterColor = [System.Drawing.Color]::FromArgb(60, 255, 245, 235)
-    $sheenBr.SurroundColors = @([System.Drawing.Color]::FromArgb(0, 255, 245, 235))
-    $g.FillPath($sheenBr, $sheenPath)
-
-    # Bottom subtle dark inner vignette
-    $botRect = New-Object System.Drawing.RectangleF([float]$pad, [float]($pad + $w * 0.55), [float]$w, [float]($w * 0.45))
-    $botGrad = New-Object System.Drawing.Drawing2D.LinearGradientBrush(
-        $botRect,
-        [System.Drawing.Color]::FromArgb(0, 35, 14, 8),
-        [System.Drawing.Color]::FromArgb(70, 35, 14, 8),
-        [float]90.0
-    )
-    $g.FillRectangle($botGrad, $botRect)
+    # Subtle architectural diagonal hatch inside the badge
+    $g.SetClip($basePath)
+    if ($size -ge 32) {
+        $hatchPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(24, 255, 255, 255), [float]([Math]::Max(1.0, 2.0 * $s)))
+        for ($i = -256; $i -le 512; $i += 22) {
+            $g.DrawLine($hatchPen, [float]($i * $s), [float](256.0 * $s), [float](($i + 256) * $s), [float]0.0)
+        }
+        $hatchPen.Dispose()
+    }
+    # Subtle dark inner plate ring
+    $innerPlate = New-RoundedRectPath ($pad + 14.0 * $s) ($pad + 14.0 * $s) ($w - 28.0 * $s) ($w - 28.0 * $s) (36.0 * $s)
+    $innerBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(220, 20, 23, 29))
+    $g.FillPath($innerBr, $innerPlate)
     $g.ResetClip()
 
-    # Crisp glass rim border
-    $rimPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(95, 255, 242, 232), [float]([Math]::Max(1.0, 3.0 * $s)))
-    $g.DrawPath($rimPen, $path)
+    # Crisp metallic slate rim
+    $rimPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 58, 66, 78), [float]([Math]::Max(1.2, 4.5 * $s)))
+    $g.DrawPath($rimPen, $basePath)
 
-    # Foreground Emblem: Modern Stylized Layered Translation Cards + Sparkle + Clean "A" Glyph
-    $whiteBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(250, 255, 252, 248))
-    $softCardBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(62, 255, 248, 242))
-    $cardStroke = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(215, 255, 248, 242), [float]([Math]::Max(1.2, 6.0 * $s)))
-    $cardStroke.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+    # 3. Four Cinema-Subtitle-Yellow (#FFD23F) Tactical HUD Viewfinder Corners (Meaning: Screen OCR Lens)
+    $yellow = [System.Drawing.Color]::FromArgb(255, 255, 210, 63)
+    $teal   = [System.Drawing.Color]::FromArgb(255, 61, 219, 192)
+    $ivory  = [System.Drawing.Color]::FromArgb(255, 244, 241, 234)
+    $ink    = [System.Drawing.Color]::FromArgb(255, 14, 16, 20)
 
-    # Back translucent overlay card (top-right)
-    $c2 = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $c2x = 110.0 * $s; $c2y = 58.0 * $s; $c2w = 92.0 * $s; $c2h = 84.0 * $s; $c2r = 18.0 * $s
-    $c2.AddArc($c2x, $c2y, $c2r * 2, $c2r * 2, 180, 90)
-    $c2.AddArc($c2x + $c2w - $c2r * 2, $c2y, $c2r * 2, $c2r * 2, 270, 90)
-    $c2.AddArc($c2x + $c2w - $c2r * 2, $c2y + $c2h - $c2r * 2, $c2r * 2, $c2r * 2, 0, 90)
-    $c2.AddArc($c2x, $c2y + $c2h - $c2r * 2, $c2r * 2, $c2r * 2, 90, 90)
-    $c2.CloseFigure()
-    $g.FillPath($softCardBr, $c2)
-    $g.DrawPath($cardStroke, $c2)
+    $hudPen = New-Object System.Drawing.Pen($yellow, [float]([Math]::Max(1.6, 11.0 * $s)))
+    $hudPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $hudPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $hudPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
 
-    # Two sleek text lines inside back card (representing translated subtitle)
-    $linePen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(245, 255, 252, 248), [float]([Math]::Max(1.4, 9.0 * $s)))
-    $linePen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $linePen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $g.DrawLine($linePen, [float](132 * $s), [float](90 * $s), [float](182 * $s), [float](90 * $s))
-    $g.DrawLine($linePen, [float](132 * $s), [float](114 * $s), [float](166 * $s), [float](114 * $s))
+    $m0 = 42.0 * $s
+    $m1 = 214.0 * $s
+    $cl = 30.0 * $s
+    # Top-Left bracket
+    $g.DrawLine($hudPen, $m0, $m0 + $cl, $m0, $m0); $g.DrawLine($hudPen, $m0, $m0, $m0 + $cl, $m0)
+    # Top-Right bracket
+    $g.DrawLine($hudPen, $m1 - $cl, $m0, $m1, $m0); $g.DrawLine($hudPen, $m1, $m0, $m1, $m0 + $cl)
+    # Bottom-Left bracket
+    $g.DrawLine($hudPen, $m0, $m1 - $cl, $m0, $m1); $g.DrawLine($hudPen, $m0, $m1, $m0 + $cl, $m1)
+    # Bottom-Right bracket
+    $g.DrawLine($hudPen, $m1 - $cl, $m1, $m1, $m1); $g.DrawLine($hudPen, $m1, $m1, $m1, $m1 - $cl)
 
-    # Front solid white rounded card (bottom-left)
-    $c1 = New-Object System.Drawing.Drawing2D.GraphicsPath
-    $c1x = 54.0 * $s; $c1y = 104.0 * $s; $c1w = 104.0 * $s; $c1h = 96.0 * $s; $c1r = 20.0 * $s
-    $c1.AddArc($c1x, $c1y, $c1r * 2, $c1r * 2, 180, 90)
-    $c1.AddArc($c1x + $c1w - $c1r * 2, $c1y, $c1r * 2, $c1r * 2, 270, 90)
-    $c1.AddArc($c1x + $c1w - $c1r * 2, $c1y + $c1h - $c1r * 2, $c1r * 2, $c1r * 2, 0, 90)
-    $c1.AddArc($c1x, $c1y + $c1h - $c1r * 2, $c1r * 2, $c1r * 2, 90, 90)
-    $c1.CloseFigure()
-    $c1ShBr = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(55, 60, 20, 8))
-    $g.TranslateTransform([float](4 * $s), [float](6 * $s))
-    $g.FillPath($c1ShBr, $c1)
-    $g.ResetTransform()
-    $g.FillPath($whiteBr, $c1)
+    # 4. Ergonomic Game Controller Silhouette (Meaning: Made for Gaming!)
+    $gpPath = New-RoundedRectPath (58.0 * $s) (66.0 * $s) (140.0 * $s) (82.0 * $s) (38.0 * $s)
+    $gpFill = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 32, 37, 46))
+    $gpStroke = New-Object System.Drawing.Pen($ivory, [float]([Math]::Max(1.4, 7.0 * $s)))
+    $g.FillPath($gpFill, $gpPath)
+    $g.DrawPath($gpStroke, $gpPath)
 
-    # Geometric Terracotta "A" glyph inside front white card
-    $glyphPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 186, 78, 46), [float]([Math]::Max(1.6, 12.0 * $s)))
-    $glyphPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $glyphPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-    $glyphPen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-    $g.DrawLine($glyphPen, [float](82 * $s), [float](176 * $s), [float](106 * $s), [float](124 * $s))
-    $g.DrawLine($glyphPen, [float](106 * $s), [float](124 * $s), [float](130 * $s), [float](176 * $s))
-    $g.DrawLine($glyphPen, [float](90 * $s), [float](160 * $s), [float](122 * $s), [float](160 * $s))
+    # Controller D-Pad (Left side, crisp Subtitle Yellow)
+    $dpPen = New-Object System.Drawing.Pen($yellow, [float]([Math]::Max(1.8, 11.0 * $s)))
+    $dpPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $dpPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $dpx = 96.0 * $s; $dpy = 107.0 * $s; $dpr = 16.0 * $s
+    $g.DrawLine($dpPen, $dpx - $dpr, $dpy, $dpx + $dpr, $dpy)
+    $g.DrawLine($dpPen, $dpx, $dpy - $dpr, $dpx, $dpy + $dpr)
 
-    # Crisp 4-point Claude-style star sparkle at bottom-right
-    $spX = 186.0 * $s; $spY = 176.0 * $s; $spR = 20.0 * $s; $spIn = 6.0 * $s
-    $starPts = @(
-        (New-Object System.Drawing.PointF($spX, ($spY - $spR))),
-        (New-Object System.Drawing.PointF(($spX + $spIn), ($spY - $spIn))),
-        (New-Object System.Drawing.PointF(($spX + $spR), $spY)),
-        (New-Object System.Drawing.PointF(($spX + $spIn), ($spY + $spIn))),
-        (New-Object System.Drawing.PointF($spX, ($spY + $spR))),
-        (New-Object System.Drawing.PointF(($spX - $spIn), ($spY + $spIn))),
-        (New-Object System.Drawing.PointF(($spX - $spR), $spY)),
-        (New-Object System.Drawing.PointF(($spX - $spIn), ($spY - $spIn)))
-    )
-    $g.FillPolygon($whiteBr, $starPts)
+    # Controller 4 Action Diamond Buttons (Right side: Teal & Yellow)
+    $tealBr = New-Object System.Drawing.SolidBrush($teal)
+    $yelBr  = New-Object System.Drawing.SolidBrush($yellow)
+    $ivBr   = New-Object System.Drawing.SolidBrush($ivory)
+    $abx = 160.0 * $s; $aby = 107.0 * $s; $abr = 15.0 * $s; $bd = [Math]::Max(2.2, 13.0 * $s)
+    $g.FillEllipse($tealBr, $abx - $bd * 0.5, $aby - $abr - $bd * 0.5, $bd, $bd) # Top
+    $g.FillEllipse($yelBr,  $abx + $abr - $bd * 0.5, $aby - $bd * 0.5, $bd, $bd) # Right
+    $g.FillEllipse($ivBr,   $abx - $bd * 0.5, $aby + $abr - $bd * 0.5, $bd, $bd) # Bottom
+    $g.FillEllipse($tealBr, $abx - $abr - $bd * 0.5, $aby - $bd * 0.5, $bd, $bd) # Left
+
+    # 5. Live Translated Subtitle Bar Underneath Controller (Meaning: Real-Time Game Subtitles!)
+    $subBar1 = New-RoundedRectPath (66.0 * $s) (166.0 * $s) (124.0 * $s) (14.0 * $s) (7.0 * $s)
+    $g.FillPath($yelBr, $subBar1)
+
+    $subBar2 = New-RoundedRectPath (84.0 * $s) (188.0 * $s) (88.0 * $s) (12.0 * $s) (6.0 * $s)
+    $g.FillPath($tealBr, $subBar2)
+
+    # Live Signal Dot at top center
+    $sigD = [Math]::Max(2.0, 12.0 * $s)
+    $g.FillEllipse($tealBr, (128.0 * $s) - $sigD * 0.5, (42.0 * $s) - $sigD * 0.5, $sigD, $sigD)
 
     $g.Dispose()
     return $bmp
@@ -154,7 +142,6 @@ foreach ($sz in $sizes) {
     $bmp.Dispose()
 }
 
-# Write multi-resolution Vista+ PNG-encoded ICO
 $fs = [System.IO.File]::Open($OutIco, [System.IO.FileMode]::Create)
 $bw = New-Object System.IO.BinaryWriter($fs)
 $bw.Write([uint16]0)
@@ -180,4 +167,4 @@ foreach ($entry in $pngBuffers) {
 }
 $bw.Close()
 $fs.Close()
-Write-Host "Generated multi-res icon: $OutIco"
+Write-Host "Generated multi-res gaming icon: $OutIco"

@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Windows.Forms;
 
 namespace TranslatorLive
@@ -41,7 +42,13 @@ namespace TranslatorLive
         Settings,
         ScanArea,
         Rocket,
-        Download
+        Download,
+        Book,
+        Search,
+        Shield,
+        Pattern,
+        WindowLock,
+        Target
     }
 
     public class Palette
@@ -55,6 +62,8 @@ namespace TranslatorLive
         public Color Border;
         public Color BorderStrong;
         public Color Shadow;
+        public Color PatternInk;
+        public Color PatternAccent;
 
         public Color Text;
         public Color TextSub;
@@ -79,61 +88,65 @@ namespace TranslatorLive
             p.Dark = dark;
             if (dark)
             {
-                // Figma Minimalist UI Kit — Modern Dark Mode (Deep Zinc / Slate)
-                p.Bg = Color.FromArgb(9, 9, 11);               // #09090B deep matte black canvas
-                p.Sidebar = Color.FromArgb(14, 14, 17);         // #0E0E11 sidebar with subtle separation
-                p.Card = Color.FromArgb(24, 24, 27);            // #18181B (Zinc 900) card background
-                p.CardHover = Color.FromArgb(34, 34, 39);       // #222227 soft card hover
-                p.Well = Color.FromArgb(18, 18, 20);            // #121214 inset container well
-                p.Border = Color.FromArgb(39, 39, 42);          // #27272A (Zinc 800) 1px clean border
-                p.BorderStrong = Color.FromArgb(63, 63, 70);    // #3F3F46 (Zinc 700) prominent borders
-                p.Shadow = Color.FromArgb(80, 0, 0, 0);
+                // Studio Editorial Dark — Matte Ink, Architectural Slate & Cinema Subtitle Yellow (Zero AI-Slop Gradients)
+                p.Bg = Color.FromArgb(13, 14, 16);              // #0D0E10 matte studio ink
+                p.Sidebar = Color.FromArgb(17, 19, 22);         // #111316 graphite sidebar
+                p.Card = Color.FromArgb(22, 24, 28);            // #16181C elevated panel
+                p.CardHover = Color.FromArgb(30, 33, 39);       // #1E2127 crisp hover
+                p.Well = Color.FromArgb(15, 17, 20);            // #0F1114 recessed well
+                p.Border = Color.FromArgb(38, 42, 49);          // #262A31 1px hairline border
+                p.BorderStrong = Color.FromArgb(56, 62, 72);    // #383E48 structural border
+                p.Shadow = Color.FromArgb(95, 0, 0, 0);
+                p.PatternInk = Color.FromArgb(26, 29, 35);      // subtle architectural hatch line
+                p.PatternAccent = Color.FromArgb(38, 43, 52);   // micro drafting cross tick
 
-                p.Text = Color.FromArgb(244, 244, 245);         // #F4F4F5 (Zinc 100) high contrast readable text
-                p.TextSub = Color.FromArgb(161, 161, 170);      // #A1A1AA (Zinc 400) secondary text
-                p.TextMute = Color.FromArgb(113, 113, 122);     // #71717A (Zinc 500) subtle muted text
+                p.Text = Color.FromArgb(244, 241, 234);         // #F4F1EA warm editorial off-white
+                p.TextSub = Color.FromArgb(164, 171, 182);      // #A4ABB6 cool silver subtext
+                p.TextMute = Color.FromArgb(110, 118, 130);     // #6E7682 muted caption
 
-                p.Accent = Color.FromArgb(250, 250, 250);       // #FAFAFA solid light primary button
-                p.AccentHover = Color.FromArgb(228, 228, 231);  // #E4E4E7 hover
-                p.AccentSoft = Color.FromArgb(39, 39, 42);      // #27272A
-                p.AccentText = Color.FromArgb(250, 250, 250);   // #FAFAFA
-                p.AccentBtnText = Color.FromArgb(9, 9, 11);     // #09090B high-contrast black text on button
+                p.Accent = Color.FromArgb(255, 210, 63);        // #FFD23F cinema subtitle yellow
+                p.AccentHover = Color.FromArgb(238, 192, 46);   // #EEC02E warm press/hover
+                p.AccentSoft = Color.FromArgb(44, 38, 18);      // warm muted amber tint
+                p.AccentText = Color.FromArgb(255, 210, 63);    // #FFD23F
+                p.AccentBtnText = Color.FromArgb(13, 14, 16);   // #0D0E10 AAA contrast dark ink
 
-                p.Live = Color.FromArgb(52, 211, 153);          // Emerald 400
-                p.LiveHover = Color.FromArgb(16, 185, 129);
-                p.LiveSoft = Color.FromArgb(30, 52, 211, 153);
+                p.Live = Color.FromArgb(61, 219, 192);          // #3DDBC0 crisp teal signal
+                p.LiveHover = Color.FromArgb(43, 194, 168);
+                p.LiveSoft = Color.FromArgb(28, 61, 219, 192);
 
-                p.Danger = Color.FromArgb(248, 113, 113);       // Red 400
-                p.DangerSoft = Color.FromArgb(30, 248, 113, 113);
+                p.Danger = Color.FromArgb(255, 77, 61);         // #FF4D3D editorial vermilion
+                p.DangerSoft = Color.FromArgb(28, 255, 77, 61);
             }
             else
             {
-                // Figma Minimalist UI Kit — Modern Light Mode (Pure White, Neutral Gray, Solid Black Accents)
-                p.Bg = Color.FromArgb(248, 249, 250);           // #F8F9FA crisp off-white canvas
-                p.Sidebar = Color.FromArgb(255, 255, 255);      // #FFFFFF pure white sidebar with 1px border
-                p.Card = Color.FromArgb(255, 255, 255);         // #FFFFFF pure white card surface
-                p.CardHover = Color.FromArgb(244, 244, 245);    // #F4F4F5 (Zinc 100) hover
-                p.Well = Color.FromArgb(244, 244, 245);         // #F4F4F5 inset container well
-                p.Border = Color.FromArgb(228, 228, 231);       // #E4E4E7 (5% black stroke in Figma)
-                p.BorderStrong = Color.FromArgb(212, 212, 216); // #D4D4D8 (Zinc 300)
-                p.Shadow = Color.FromArgb(10, 0, 0, 0);         // soft subtle ambient shadow
+                // Studio Editorial Light — Warm Drafting Paper, Crisp Ink & Brass Signal
+                p.Bg = Color.FromArgb(243, 240, 232);           // #F3F0E8 warm architectural paper
+                p.Sidebar = Color.FromArgb(250, 248, 243);      // #FAF8F3 light ivory sidebar
+                p.Card = Color.FromArgb(255, 255, 255);         // #FFFFFF pure card surface
+                p.CardHover = Color.FromArgb(239, 236, 228);    // #EFECE4 warm hover
+                p.Well = Color.FromArgb(234, 230, 220);         // #EAE6DC recessed paper well
+                p.Border = Color.FromArgb(218, 212, 199);       // #DAD4C7 hairline paper border
+                p.BorderStrong = Color.FromArgb(192, 184, 168); // #C0B8A8 structural rule
+                p.Shadow = Color.FromArgb(14, 21, 23, 26);
+                p.PatternInk = Color.FromArgb(228, 223, 212);   // subtle drafting hatch
+                p.PatternAccent = Color.FromArgb(208, 201, 186);
 
-                p.Text = Color.FromArgb(24, 24, 27);            // #18181B (Zinc 900) sharp dark text
-                p.TextSub = Color.FromArgb(113, 113, 122);      // #71717A (Zinc 500) clean subtext
-                p.TextMute = Color.FromArgb(161, 161, 170);     // #A1A1AA (Zinc 400) placeholders
-                
-                p.Accent = Color.FromArgb(24, 24, 27);          // #18181B solid dark primary button in Figma
-                p.AccentHover = Color.FromArgb(39, 39, 42);     // #27272A
-                p.AccentSoft = Color.FromArgb(244, 244, 245);   // #F4F4F5
-                p.AccentText = Color.FromArgb(24, 24, 27);      // #18181B
-                p.AccentBtnText = Color.White;                  // White text on dark button
+                p.Text = Color.FromArgb(21, 23, 26);            // #15171A sharp studio ink
+                p.TextSub = Color.FromArgb(90, 96, 106);        // #5A606A drafting slate
+                p.TextMute = Color.FromArgb(138, 144, 154);     // #8A909A muted caption
 
-                p.Live = Color.FromArgb(16, 185, 129);          // Emerald 500
-                p.LiveHover = Color.FromArgb(5, 150, 105);
-                p.LiveSoft = Color.FromArgb(25, 16, 185, 129);
+                p.Accent = Color.FromArgb(21, 23, 26);          // #15171A crisp ink button
+                p.AccentHover = Color.FromArgb(42, 46, 54);
+                p.AccentSoft = Color.FromArgb(248, 238, 204);   // subtle warm yellow highlight pill
+                p.AccentText = Color.FromArgb(180, 118, 0);     // deep brass amber readable on paper
+                p.AccentBtnText = Color.FromArgb(255, 210, 63); // subtitle yellow text on ink button
 
-                p.Danger = Color.FromArgb(239, 68, 68);         // Red 500
-                p.DangerSoft = Color.FromArgb(25, 239, 68, 68);
+                p.Live = Color.FromArgb(15, 157, 132);          // crisp deep teal
+                p.LiveHover = Color.FromArgb(11, 130, 109);
+                p.LiveSoft = Color.FromArgb(24, 15, 157, 132);
+
+                p.Danger = Color.FromArgb(220, 38, 38);
+                p.DangerSoft = Color.FromArgb(24, 220, 38, 38);
             }
             return p;
         }
@@ -216,44 +229,187 @@ namespace TranslatorLive
             using (Pen pen = new Pen(c, w)) g.DrawPath(pen, p);
         }
 
-        public static void DrawCard(Graphics g, Palette pal, RectangleF r, float rad = 16f)
+        private static Bitmap _cachedPatternTile;
+        private static TextureBrush _cachedPatternBrush;
+        private static int _cachedPatternKey = -1;
+
+        public static void DrawCanvasBackground(Graphics g, Palette pal, RectangleF bounds, int patternMode)
         {
-            FillRR(g, new RectangleF(r.X, r.Y + 1.5f, r.Width, r.Height), rad, pal.Shadow);
-            FillRR(g, r, rad, pal.Card);
-            DrawRR(g, r, rad, pal.Border, 1f);
+            using (SolidBrush bg = new SolidBrush(pal.Bg))
+                g.FillRectangle(bg, bounds);
+
+            if (patternMode == 3) return; // Polos
+
+            int key = (pal.Dark ? 100 : 0) + patternMode;
+            if (_cachedPatternBrush == null || _cachedPatternKey != key)
+            {
+                if (_cachedPatternBrush != null) { _cachedPatternBrush.Dispose(); _cachedPatternBrush = null; }
+                if (_cachedPatternTile != null) { _cachedPatternTile.Dispose(); _cachedPatternTile = null; }
+
+                int tileSz = (patternMode == 0) ? 16 : (patternMode == 1 ? 24 : 18);
+                Bitmap tile = new Bitmap(tileSz, tileSz, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                using (Graphics tg = Graphics.FromImage(tile))
+                {
+                    tg.Clear(Color.Transparent);
+                    if (patternMode == 0)
+                    {
+                        // Arsiran Diagonal 45° — Crisp Architectural Hatch (Zero AI-Slop Gradient)
+                        tg.SmoothingMode = SmoothingMode.None;
+                        using (Pen hp = new Pen(pal.PatternInk, 1f))
+                        {
+                            // Seamless 45-degree diagonal lines across 16x16 tile
+                            tg.DrawLine(hp, 0, tileSz - 1, tileSz - 1, 0);
+                            tg.DrawLine(hp, -tileSz, tileSz - 1, tileSz - 1, -tileSz);
+                            tg.DrawLine(hp, 0, tileSz * 2 - 1, tileSz * 2 - 1, 0);
+                        }
+                        // Tiny architectural dot at corner intersection
+                        using (SolidBrush db = new SolidBrush(pal.PatternAccent))
+                            tg.FillRectangle(db, 0, 0, 1, 1);
+                    }
+                    else if (patternMode == 1)
+                    {
+                        // Blueprint Drafting Grid with precision crosshairs
+                        tg.SmoothingMode = SmoothingMode.None;
+                        using (Pen gp = new Pen(pal.PatternInk, 1f))
+                        {
+                            tg.DrawLine(gp, 0, 0, tileSz, 0);
+                            tg.DrawLine(gp, 0, 0, 0, tileSz);
+                        }
+                        using (SolidBrush cb = new SolidBrush(pal.PatternAccent))
+                        {
+                            tg.FillRectangle(cb, 0, 0, 3, 1);
+                            tg.FillRectangle(cb, 0, 0, 1, 3);
+                        }
+                    }
+                    else if (patternMode == 2)
+                    {
+                        // Precision Dot Matrix
+                        using (SolidBrush db = new SolidBrush(pal.PatternAccent))
+                            tg.FillRectangle(db, 2, 2, 2, 2);
+                    }
+                }
+                _cachedPatternTile = tile;
+                _cachedPatternBrush = new TextureBrush(tile, WrapMode.Tile);
+                _cachedPatternKey = key;
+            }
+
+            g.FillRectangle(_cachedPatternBrush, bounds);
         }
 
-        // NATIVE WINDOWS GDI CLEARTYPE TEXT RENDERING — 100% RAZOR SHARP AT ANY DPI/ZOOM!
+        public static void DrawStudioStage(Graphics g, Palette pal, RectangleF r, float rad)
+        {
+            // Clean architectural matte cinema stage with fine crosshatch (replaces gradient slop)
+            Color baseCol = pal.Dark ? Color.FromArgb(10, 11, 13) : Color.FromArgb(24, 26, 30);
+            Color hatchCol = Color.FromArgb(24, 255, 255, 255);
+            FillRR(g, r, rad, baseCol);
+
+            GraphicsState gs = g.Save();
+            try
+            {
+                using (GraphicsPath clipP = RoundPath(r, rad))
+                {
+                    g.SetClip(clipP);
+                    using (HatchBrush hb = new HatchBrush(HatchStyle.LightUpwardDiagonal, hatchCol, Color.Transparent))
+                        g.FillRectangle(hb, r);
+                    // Subtle cinema frame corner brackets inside preview stage
+                    using (Pen cp = new Pen(Color.FromArgb(65, 255, 210, 63), 1.4f))
+                    {
+                        float m = 12f, cl = 10f;
+                        g.DrawLine(cp, r.X + m, r.Y + m + cl, r.X + m, r.Y + m);
+                        g.DrawLine(cp, r.X + m, r.Y + m, r.X + m + cl, r.Y + m);
+                        g.DrawLine(cp, r.Right - m - cl, r.Y + m, r.Right - m, r.Y + m);
+                        g.DrawLine(cp, r.Right - m, r.Y + m, r.Right - m, r.Y + m + cl);
+                        g.DrawLine(cp, r.X + m, r.Bottom - m - cl, r.X + m, r.Bottom - m);
+                        g.DrawLine(cp, r.X + m, r.Bottom - m, r.X + m + cl, r.Bottom - m);
+                        g.DrawLine(cp, r.Right - m - cl, r.Bottom - m, r.Right - m, r.Bottom - m);
+                        g.DrawLine(cp, r.Right - m, r.Bottom - m, r.Right - m, r.Bottom - m - cl);
+                    }
+                }
+            }
+            finally { g.Restore(gs); }
+            DrawRR(g, r, rad, pal.BorderStrong, 1f);
+        }
+
+        public static void DrawCard(Graphics g, Palette pal, RectangleF r, float rad = 12f)
+        {
+            FillRR(g, new RectangleF(r.X, r.Y + 2f, r.Width, r.Height), rad, pal.Shadow);
+            FillRR(g, r, rad, pal.Card);
+            DrawRR(g, r, rad, pal.Border, 1f);
+            if (pal.Dark && r.Width > 32f)
+            {
+                // Crisp subtle architectural top edge catchlight (no gradient)
+                using (Pen hl = new Pen(Color.FromArgb(18, 255, 255, 255), 1f))
+                    g.DrawLine(hl, r.X + rad, r.Y + 1f, r.Right - rad, r.Y + 1f);
+            }
+        }
+
+        // CRISP ANTI-ALIASED TEXT RENDERING — ZERO CLEARTYPE BLACK-FRINGE BLEED ON YELLOW/LIGHT SURFACES!
         public static void DrawTextLeft(Graphics g, string text, Font f, Color c, RectangleF r)
         {
-            if (string.IsNullOrEmpty(text)) return;
-            Rectangle ir = Rectangle.Round(r);
-            TextRenderer.DrawText(g, text, f, ir, c,
-                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
+            TextRenderingHint prev = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (SolidBrush br = new SolidBrush(c))
+            using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
+            {
+                sf.Alignment = StringAlignment.Near;
+                sf.LineAlignment = StringAlignment.Center;
+                sf.Trimming = StringTrimming.EllipsisCharacter;
+                sf.HotkeyPrefix = System.Drawing.Text.HotkeyPrefix.None;
+                g.DrawString(text, f, br, r, sf);
+            }
+            g.TextRenderingHint = prev;
         }
 
         public static void DrawTextCenter(Graphics g, string text, Font f, Color c, RectangleF r)
         {
-            if (string.IsNullOrEmpty(text)) return;
-            Rectangle ir = Rectangle.Round(r);
-            TextRenderer.DrawText(g, text, f, ir, c,
-                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
+            TextRenderingHint prev = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (SolidBrush br = new SolidBrush(c))
+            using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
+            {
+                sf.Alignment = StringAlignment.Center;
+                sf.LineAlignment = StringAlignment.Center;
+                sf.Trimming = StringTrimming.EllipsisCharacter;
+                sf.HotkeyPrefix = System.Drawing.Text.HotkeyPrefix.None;
+                g.DrawString(text, f, br, r, sf);
+            }
+            g.TextRenderingHint = prev;
         }
 
         public static void DrawTextRight(Graphics g, string text, Font f, Color c, RectangleF r)
         {
-            if (string.IsNullOrEmpty(text)) return;
-            Rectangle ir = Rectangle.Round(r);
-            TextRenderer.DrawText(g, text, f, ir, c,
-                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.SingleLine);
+            if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
+            TextRenderingHint prev = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (SolidBrush br = new SolidBrush(c))
+            using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
+            {
+                sf.Alignment = StringAlignment.Far;
+                sf.LineAlignment = StringAlignment.Center;
+                sf.Trimming = StringTrimming.EllipsisCharacter;
+                sf.HotkeyPrefix = System.Drawing.Text.HotkeyPrefix.None;
+                g.DrawString(text, f, br, r, sf);
+            }
+            g.TextRenderingHint = prev;
         }
 
         public static void DrawTextWrap(Graphics g, string text, Font f, Color c, RectangleF r)
         {
-            if (string.IsNullOrEmpty(text)) return;
-            Rectangle ir = Rectangle.Round(r);
-            TextRenderer.DrawText(g, text, f, ir, c,
-                TextFormatFlags.Left | TextFormatFlags.Top | TextFormatFlags.WordBreak | TextFormatFlags.NoPrefix);
+            if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
+            TextRenderingHint prev = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            using (SolidBrush br = new SolidBrush(c))
+            using (StringFormat sf = new StringFormat())
+            {
+                sf.Alignment = StringAlignment.Near;
+                sf.LineAlignment = StringAlignment.Near;
+                sf.Trimming = StringTrimming.EllipsisWord;
+                sf.HotkeyPrefix = System.Drawing.Text.HotkeyPrefix.None;
+                g.DrawString(text, f, br, r, sf);
+            }
+            g.TextRenderingHint = prev;
         }
 
         // PREMIUM MINIMALIST VECTOR ICONS (Lucide / Feather / Figma Precision)
@@ -304,15 +460,17 @@ namespace TranslatorLive
                             break;
 
                         case IconKind.ScanArea:
-                            // Sleek Display Frame with Active Center Scanline
-                            RectangleF mon = new RectangleF(x + w * 0.12f, y + h * 0.14f, w * 0.76f, h * 0.54f);
-                            DrawRR(g, mon, 3f, col, sw);
-                            g.DrawLine(p, cx, mon.Bottom, cx, r.Bottom - h * 0.14f);
-                            g.DrawLine(p, cx - w * 0.20f, r.Bottom - h * 0.14f, cx + w * 0.20f, r.Bottom - h * 0.14f);
-                            // Laser scan beam + center focus dot
-                            float sY = mon.Y + mon.Height * 0.5f;
-                            g.DrawLine(p, mon.X + w * 0.12f, sY, mon.Right - w * 0.12f, sY);
-                            g.FillEllipse(b, cx - w * 0.05f, sY - h * 0.05f, w * 0.10f, h * 0.10f);
+                            // Tactical Gaming Sniper Reticle & Corner HUD Brackets
+                            float cl2 = w * 0.25f;
+                            float scx0 = x + w * 0.10f, scx1 = r.Right - w * 0.10f;
+                            float scy0 = y + h * 0.10f, scy1 = r.Bottom - h * 0.10f;
+                            g.DrawLine(p, scx0, scy0 + cl2, scx0, scy0); g.DrawLine(p, scx0, scy0, scx0 + cl2, scy0);
+                            g.DrawLine(p, scx1 - cl2, scy0, scx1, scy0); g.DrawLine(p, scx1, scy0, scx1, scy0 + cl2);
+                            g.DrawLine(p, scx0, scy1 - cl2, scx0, scy1); g.DrawLine(p, scx0, scy1, scx0 + cl2, scy1);
+                            g.DrawLine(p, scx1 - cl2, scy1, scx1, scy1); g.DrawLine(p, scx1, scy1, scx1, scy1 - cl2);
+                            float cr = w * 0.18f;
+                            g.DrawEllipse(p, cx - cr, cy - cr, cr * 2f, cr * 2f);
+                            g.FillEllipse(b, cx - w * 0.06f, cy - h * 0.06f, w * 0.12f, h * 0.12f);
                             break;
 
                         case IconKind.EditBox:
@@ -378,18 +536,27 @@ namespace TranslatorLive
                             break;
 
                         case IconKind.Gamepad:
-                            // Sleek Ergonomic Gamepad with D-pad & 4 Action Buttons
-                            RectangleF gpBox = new RectangleF(x + w * 0.12f, y + h * 0.20f, w * 0.76f, h * 0.58f);
-                            DrawRR(g, gpBox, h * 0.24f, col, sw);
-                            float dpx = gpBox.X + w * 0.20f, dpy = cy + h * 0.02f;
-                            g.DrawLine(p, dpx - w * 0.08f, dpy, dpx + w * 0.08f, dpy);
-                            g.DrawLine(p, dpx, dpy - h * 0.08f, dpx, dpy + h * 0.08f);
-                            float abx = gpBox.Right - w * 0.20f, aby = cy + h * 0.02f;
-                            float bsz = Math.Max(2f, w * 0.06f);
-                            g.FillEllipse(b, abx - bsz * 0.5f, aby - h * 0.08f - bsz * 0.5f, bsz, bsz);
-                            g.FillEllipse(b, abx - bsz * 0.5f, aby + h * 0.08f - bsz * 0.5f, bsz, bsz);
-                            g.FillEllipse(b, abx - w * 0.08f - bsz * 0.5f, aby - bsz * 0.5f, bsz, bsz);
-                            g.FillEllipse(b, abx + w * 0.08f - bsz * 0.5f, aby - bsz * 0.5f, bsz, bsz);
+                            // Pro Gaming Controller with Sculpted Grips, Bold D-Pad & 4 Diamond Action Buttons
+                            using (GraphicsPath gp = new GraphicsPath())
+                            {
+                                gp.AddBezier(x + w * 0.28f, y + h * 0.22f, cx - w * 0.10f, y + h * 0.22f, cx + w * 0.10f, y + h * 0.22f, r.Right - w * 0.28f, y + h * 0.22f);
+                                gp.AddBezier(r.Right - w * 0.28f, y + h * 0.22f, r.Right - w * 0.08f, y + h * 0.22f, r.Right - w * 0.06f, r.Bottom - h * 0.16f, r.Right - w * 0.20f, r.Bottom - h * 0.16f);
+                                gp.AddLine(r.Right - w * 0.20f, r.Bottom - h * 0.16f, cx + w * 0.14f, cy + h * 0.14f);
+                                gp.AddLine(cx + w * 0.14f, cy + h * 0.14f, cx - w * 0.14f, cy + h * 0.14f);
+                                gp.AddLine(cx - w * 0.14f, cy + h * 0.14f, x + w * 0.20f, r.Bottom - h * 0.16f);
+                                gp.AddBezier(x + w * 0.20f, r.Bottom - h * 0.16f, x + w * 0.06f, r.Bottom - h * 0.16f, x + w * 0.08f, y + h * 0.22f, x + w * 0.28f, y + h * 0.22f);
+                                gp.CloseFigure();
+                                g.DrawPath(p, gp);
+                            }
+                            float dpx = x + w * 0.30f, dpy = cy - h * 0.04f;
+                            g.DrawLine(p, dpx - w * 0.09f, dpy, dpx + w * 0.09f, dpy);
+                            g.DrawLine(p, dpx, dpy - h * 0.09f, dpx, dpy + h * 0.09f);
+                            float abx = r.Right - w * 0.30f, aby = cy - h * 0.04f;
+                            float bsz = Math.Max(2.2f, w * 0.085f);
+                            g.FillEllipse(b, abx - bsz * 0.5f, aby - h * 0.09f - bsz * 0.5f, bsz, bsz);
+                            g.FillEllipse(b, abx - bsz * 0.5f, aby + h * 0.09f - bsz * 0.5f, bsz, bsz);
+                            g.FillEllipse(b, abx - w * 0.09f - bsz * 0.5f, aby - bsz * 0.5f, bsz, bsz);
+                            g.FillEllipse(b, abx + w * 0.09f - bsz * 0.5f, aby - bsz * 0.5f, bsz, bsz);
                             break;
 
                         case IconKind.Swap:
@@ -558,84 +725,39 @@ namespace TranslatorLive
                             break;
 
                         case IconKind.Palette:
-                            // Authentic Lucide Artist Palette with Thumb Notch & Outer Color Drops
-                            float sx = w / 24f, sy = h / 24f;
-                            using (GraphicsPath pp = new GraphicsPath())
-                            {
-                                pp.AddBezier(new PointF(x + 12f * sx, y + 2f * sy), new PointF(x + 6.48f * sx, y + 2f * sy), new PointF(x + 2f * sx, y + 6.48f * sy), new PointF(x + 2f * sx, y + 12f * sy));
-                                pp.AddBezier(new PointF(x + 2f * sx, y + 12f * sy), new PointF(x + 2f * sx, y + 17.52f * sy), new PointF(x + 6.48f * sx, y + 22f * sy), new PointF(x + 12f * sx, y + 22f * sy));
-                                pp.AddBezier(new PointF(x + 12f * sx, y + 22f * sy), new PointF(x + 13.1f * sx, y + 22f * sy), new PointF(x + 13.8f * sx, y + 21.2f * sy), new PointF(x + 13.8f * sx, y + 20.3f * sy));
-                                pp.AddBezier(new PointF(x + 13.8f * sx, y + 20.3f * sy), new PointF(x + 13.8f * sx, y + 19.8f * sy), new PointF(x + 13.4f * sx, y + 19.3f * sy), new PointF(x + 13.1f * sx, y + 18.9f * sy));
-                                pp.AddBezier(new PointF(x + 13.1f * sx, y + 18.9f * sy), new PointF(x + 12.8f * sx, y + 18.5f * sy), new PointF(x + 12.6f * sx, y + 18.0f * sy), new PointF(x + 12.6f * sx, y + 17.5f * sy));
-                                pp.AddBezier(new PointF(x + 12.6f * sx, y + 17.5f * sy), new PointF(x + 12.6f * sx, y + 16.4f * sy), new PointF(x + 13.5f * sx, y + 15.5f * sy), new PointF(x + 14.6f * sx, y + 15.5f * sy));
-                                pp.AddLine(new PointF(x + 14.6f * sx, y + 15.5f * sy), new PointF(x + 16.6f * sx, y + 15.5f * sy));
-                                pp.AddBezier(new PointF(x + 16.6f * sx, y + 15.5f * sy), new PointF(x + 19.7f * sx, y + 15.5f * sy), new PointF(x + 22f * sx, y + 13.0f * sy), new PointF(x + 22f * sx, y + 9.9f * sy));
-                                pp.AddBezier(new PointF(x + 22f * sx, y + 9.9f * sy), new PointF(x + 22f * sx, y + 5.5f * sy), new PointF(x + 17.5f * sx, y + 2f * sy), new PointF(x + 12f * sx, y + 2f * sy));
-                                pp.CloseFigure();
-                                g.DrawPath(p, pp);
-                            }
-                            float dotR = Math.Max(1.4f, 1.2f * sx);
-                            g.FillEllipse(b, x + 8.5f * sx - dotR, y + 7.5f * sy - dotR, dotR * 2f, dotR * 2f);
-                            g.FillEllipse(b, x + 13.5f * sx - dotR, y + 6.5f * sy - dotR, dotR * 2f, dotR * 2f);
-                            g.FillEllipse(b, x + 17.5f * sx - dotR, y + 9.5f * sy - dotR, dotR * 2f, dotR * 2f);
-                            g.FillEllipse(b, x + 6.5f * sx - dotR, y + 12.5f * sy - dotR, dotR * 2f, dotR * 2f);
+                            // Gaming HUD Visor / Subtitle Display Frame (Replaces generic paint palette!)
+                            RectangleF hudMon = new RectangleF(x + w * 0.08f, y + h * 0.14f, w * 0.84f, h * 0.56f);
+                            DrawRR(g, hudMon, 3f, col, sw);
+                            // Stand base
+                            g.DrawLine(p, cx, hudMon.Bottom, cx, r.Bottom - h * 0.14f);
+                            g.DrawLine(p, cx - w * 0.24f, r.Bottom - h * 0.14f, cx + w * 0.24f, r.Bottom - h * 0.14f);
+                            // Bold subtitle bars inside visor
+                            g.DrawLine(p, hudMon.X + w * 0.14f, hudMon.Bottom - h * 0.24f, hudMon.Right - w * 0.14f, hudMon.Bottom - h * 0.24f);
+                            g.DrawLine(p, hudMon.X + w * 0.24f, hudMon.Bottom - h * 0.11f, hudMon.Right - w * 0.24f, hudMon.Bottom - h * 0.11f);
                             break;
 
                         case IconKind.Settings:
-                            // Precision 6-Tooth Mechanical Gear
-                            using (GraphicsPath gearP = new GraphicsPath())
+                            // Gaming Tactical Hex-Core / Hardware Chipset (Replaces generic office gear!)
+                            float hr = w * 0.36f;
+                            PointF[] hexPts = new PointF[6];
+                            for (int i = 0; i < 6; i++)
                             {
-                                float rOut = w * 0.40f;
-                                float rIn = w * 0.28f;
-                                for (int i = 0; i < 6; i++)
-                                {
-                                    double deg = i * 60.0;
-                                    double a1 = (deg - 14.0) * Math.PI / 180.0;
-                                    double a2 = (deg - 9.0) * Math.PI / 180.0;
-                                    double a3 = (deg + 9.0) * Math.PI / 180.0;
-                                    double a4 = (deg + 14.0) * Math.PI / 180.0;
-
-                                    PointF p1 = new PointF(cx + (float)Math.Cos(a1) * rIn, cy + (float)Math.Sin(a1) * rIn);
-                                    PointF p2 = new PointF(cx + (float)Math.Cos(a2) * rOut, cy + (float)Math.Sin(a2) * rOut);
-                                    PointF p3 = new PointF(cx + (float)Math.Cos(a3) * rOut, cy + (float)Math.Sin(a3) * rOut);
-                                    PointF p4 = new PointF(cx + (float)Math.Cos(a4) * rIn, cy + (float)Math.Sin(a4) * rIn);
-
-                                    if (i == 0) gearP.AddLine(p1, p2);
-                                    else { gearP.AddLine(gearP.GetLastPoint(), p1); gearP.AddLine(p1, p2); }
-                                    gearP.AddLine(p2, p3);
-                                    gearP.AddLine(p3, p4);
-                                }
-                                gearP.CloseFigure();
-                                g.DrawPath(p, gearP);
-                                float rHole = w * 0.13f;
-                                g.DrawEllipse(p, cx - rHole, cy - rHole, rHole * 2f, rHole * 2f);
+                                double ang = (i * 60.0 - 30.0) * Math.PI / 180.0;
+                                hexPts[i] = new PointF(cx + (float)Math.Cos(ang) * hr, cy + (float)Math.Sin(ang) * hr);
                             }
+                            g.DrawPolygon(p, hexPts);
+                            float coreR = w * 0.14f;
+                            g.DrawEllipse(p, cx - coreR, cy - coreR, coreR * 2f, coreR * 2f);
+                            g.FillEllipse(b, cx - w * 0.05f, cy - h * 0.05f, w * 0.10f, h * 0.10f);
                             break;
 
                         case IconKind.Rocket:
-                            // Precision Lucide Aerodynamic Launch Rocket
-                            float rsx = w / 24f, rsy = h / 24f;
-                            using (GraphicsPath fuseP = new GraphicsPath())
-                            {
-                                fuseP.AddLine(new PointF(x + 9f * rsx, y + 12f * rsy), new PointF(x + 12f * rsx, y + 15f * rsy));
-                                fuseP.AddBezier(new PointF(x + 12f * rsx, y + 15f * rsy), new PointF(x + 16f * rsx, y + 13f * rsy), new PointF(x + 22f * rsx, y + 4.7f * rsy), new PointF(x + 22f * rsx, y + 2f * rsy));
-                                fuseP.AddBezier(new PointF(x + 22f * rsx, y + 2f * rsy), new PointF(x + 19.3f * rsx, y + 2f * rsy), new PointF(x + 11f * rsx, y + 8f * rsy), new PointF(x + 9f * rsx, y + 12f * rsy));
-                                fuseP.CloseFigure();
-                                g.DrawPath(p, fuseP);
-                            }
-                            float rPwh = Math.Max(2f, 1.6f * rsx);
-                            g.DrawEllipse(p, x + 15f * rsx - rPwh, y + 9f * rsy - rPwh, rPwh * 2f, rPwh * 2f);
-                            // Left fin
-                            g.DrawLine(p, x + 9f * rsx, y + 12f * rsy, x + 5f * rsx, y + 12f * rsy);
-                            g.DrawLine(p, x + 5f * rsx, y + 12f * rsy, x + 6.5f * rsx, y + 9f * rsy);
-                            g.DrawLine(p, x + 6.5f * rsx, y + 9f * rsy, x + 10.5f * rsx, y + 9f * rsy);
-                            // Right fin
-                            g.DrawLine(p, x + 12f * rsx, y + 15f * rsy, x + 12f * rsx, y + 19f * rsy);
-                            g.DrawLine(p, x + 12f * rsx, y + 19f * rsy, x + 15f * rsx, y + 17.5f * rsy);
-                            g.DrawLine(p, x + 15f * rsx, y + 17.5f * rsy, x + 15f * rsx, y + 13.5f * rsy);
-                            // Exhaust flame
-                            g.DrawLine(p, x + 9.5f * rsx, y + 14.5f * rsy, x + 5f * rsx, y + 19f * rsy);
-                            g.DrawLine(p, x + 8f * rsx, y + 13f * rsy, x + 4f * rsx, y + 17f * rsy);
+                            // Gaming Level-Up / Tactical Upgrade Chevrons inside Hex Badge
+                            g.DrawLine(p, x + w * 0.22f, cy - h * 0.02f, cx, y + h * 0.18f);
+                            g.DrawLine(p, cx, y + h * 0.18f, r.Right - w * 0.22f, cy - h * 0.02f);
+                            g.DrawLine(p, x + w * 0.22f, cy + h * 0.22f, cx, cy);
+                            g.DrawLine(p, cx, cy, r.Right - w * 0.22f, cy + h * 0.22f);
+                            g.DrawLine(p, x + w * 0.28f, r.Bottom - h * 0.14f, r.Right - w * 0.28f, r.Bottom - h * 0.14f);
                             break;
 
                         case IconKind.Download:
@@ -665,9 +787,87 @@ namespace TranslatorLive
                             break;
 
                         case IconKind.History:
-                            g.DrawEllipse(p, x + w * 0.15f, y + h * 0.15f, w * 0.70f, h * 0.70f);
-                            g.DrawLine(p, cx, y + h * 0.28f, cx, cy);
-                            g.DrawLine(p, cx, cy, cx + w * 0.16f, cy + h * 0.10f);
+                            // RPG Dialogue HUD Bubble with Subtitle Lines
+                            RectangleF dlgBox = new RectangleF(x + w * 0.10f, y + h * 0.14f, w * 0.80f, h * 0.56f);
+                            DrawRR(g, dlgBox, 3.5f, col, sw);
+                            PointF[] dlgTail = new PointF[]
+                            {
+                                new PointF(dlgBox.X + w * 0.16f, dlgBox.Bottom),
+                                new PointF(dlgBox.X + w * 0.08f, r.Bottom - h * 0.12f),
+                                new PointF(dlgBox.X + w * 0.34f, dlgBox.Bottom)
+                            };
+                            g.DrawLines(p, dlgTail);
+                            g.DrawLine(p, dlgBox.X + w * 0.14f, dlgBox.Y + h * 0.20f, dlgBox.Right - w * 0.14f, dlgBox.Y + h * 0.20f);
+                            g.DrawLine(p, dlgBox.X + w * 0.14f, dlgBox.Y + h * 0.36f, dlgBox.Right - w * 0.30f, dlgBox.Y + h * 0.36f);
+                            break;
+
+                        case IconKind.Book:
+                            // RPG Quest Shield & Sword Lore Crest!
+                            PointF[] crest = new PointF[]
+                            {
+                                new PointF(cx, y + h * 0.10f),
+                                new PointF(r.Right - w * 0.14f, y + h * 0.22f),
+                                new PointF(r.Right - w * 0.18f, cy + h * 0.12f),
+                                new PointF(cx, r.Bottom - h * 0.10f),
+                                new PointF(x + w * 0.18f, cy + h * 0.12f),
+                                new PointF(x + w * 0.14f, y + h * 0.22f)
+                            };
+                            g.DrawPolygon(p, crest);
+                            // Sword vertical blade + crossguard inside shield
+                            g.DrawLine(p, cx, y + h * 0.26f, cx, r.Bottom - h * 0.24f);
+                            g.DrawLine(p, cx - w * 0.14f, cy - h * 0.04f, cx + w * 0.14f, cy - h * 0.04f);
+                            break;
+
+                        case IconKind.WindowLock:
+                            // Tactical Gaming Target Crosshair (Lock-On Game Window!)
+                            float wr = w * 0.34f;
+                            g.DrawEllipse(p, cx - wr, cy - wr, wr * 2f, wr * 2f);
+                            g.DrawLine(p, cx, y + h * 0.06f, cx, y + h * 0.28f);
+                            g.DrawLine(p, cx, r.Bottom - h * 0.28f, cx, r.Bottom - h * 0.06f);
+                            g.DrawLine(p, x + w * 0.06f, cy, x + w * 0.28f, cy);
+                            g.DrawLine(p, r.Right - w * 0.28f, cy, r.Right - w * 0.06f, cy);
+                            g.FillEllipse(b, cx - w * 0.08f, cy - h * 0.08f, w * 0.16f, h * 0.16f);
+                            break;
+
+                        case IconKind.Target:
+                            // Gaming Sniper / Lock-on Reticle
+                            float tr = w * 0.32f;
+                            g.DrawEllipse(p, cx - tr, cy - tr, tr * 2f, tr * 2f);
+                            g.DrawLine(p, cx, y + h * 0.08f, cx, y + h * 0.26f);
+                            g.DrawLine(p, cx, r.Bottom - h * 0.26f, cx, r.Bottom - h * 0.08f);
+                            g.DrawLine(p, x + w * 0.08f, cy, x + w * 0.26f, cy);
+                            g.DrawLine(p, r.Right - w * 0.26f, cy, r.Right - w * 0.08f, cy);
+                            g.FillEllipse(b, cx - w * 0.07f, cy - h * 0.07f, w * 0.14f, h * 0.14f);
+                            break;
+
+                        case IconKind.Search:
+                            float sr = w * 0.28f;
+                            float scx = x + w * 0.16f + sr, scy = y + h * 0.16f + sr;
+                            g.DrawEllipse(p, scx - sr, scy - sr, sr * 2f, sr * 2f);
+                            g.DrawLine(p, scx + sr * 0.72f, scy + sr * 0.72f, r.Right - w * 0.14f, r.Bottom - h * 0.14f);
+                            break;
+
+                        case IconKind.Shield:
+                            PointF[] shPts = new PointF[]
+                            {
+                                new PointF(cx, y + h * 0.12f),
+                                new PointF(r.Right - w * 0.16f, y + h * 0.24f),
+                                new PointF(r.Right - w * 0.18f, cy + h * 0.10f),
+                                new PointF(cx, r.Bottom - h * 0.12f),
+                                new PointF(x + w * 0.18f, cy + h * 0.10f),
+                                new PointF(x + w * 0.16f, y + h * 0.24f)
+                            };
+                            g.DrawPolygon(p, shPts);
+                            g.DrawLine(p, cx - w * 0.12f, cy, cx - w * 0.02f, cy + h * 0.10f);
+                            g.DrawLine(p, cx - w * 0.02f, cy + h * 0.10f, cx + w * 0.16f, cy - h * 0.10f);
+                            break;
+
+                        case IconKind.Pattern:
+                            // Diagonal hatch square icon
+                            DrawRR(g, new RectangleF(x + w * 0.14f, y + h * 0.14f, w * 0.72f, h * 0.72f), 2.5f, col, sw);
+                            g.DrawLine(p, x + w * 0.18f, cy, cx, y + h * 0.18f);
+                            g.DrawLine(p, x + w * 0.20f, r.Bottom - h * 0.20f, r.Right - w * 0.20f, y + h * 0.20f);
+                            g.DrawLine(p, cx, r.Bottom - h * 0.18f, r.Right - w * 0.18f, cy);
                             break;
                     }
                 }

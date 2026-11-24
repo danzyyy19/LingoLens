@@ -30,6 +30,8 @@ $SrcFiles = @(
     (Join-Path $Root "src\Native.cs"),
     (Join-Path $Root "src\AppConfig.cs"),
     (Join-Path $Root "src\Theme.cs"),
+    (Join-Path $Root "src\GameLoreService.cs"),
+    (Join-Path $Root "src\Modals.cs"),
     (Join-Path $Root "src\TranslationEngine.cs"),
     (Join-Path $Root "src\UpdateChecker.cs"),
     (Join-Path $Root "src\OverlayManager.cs"),
@@ -53,7 +55,11 @@ Write-Host "Building LingoLens.exe..."
     @SrcFiles
 if ($LASTEXITCODE -ne 0) { throw "Build LingoLens.exe gagal ($LASTEXITCODE)" }
 
-Copy-Item $OutExe $PortableExe -Force
+try {
+    Copy-Item $OutExe $PortableExe -Force
+} catch {
+    Write-Warning "LingoLens-Portable.exe sedang dipakai proses lain. Tutup dulu aplikasi lama atau jalankan dist\LingoLens.exe / dist\Setup-LingoLens.exe."
+}
 
 # 3. Build Windows Installer (Setup-LingoLens.exe) with embedded LingoLens.exe
 $SetupExe = Join-Path $DistDir "Setup-LingoLens.exe"

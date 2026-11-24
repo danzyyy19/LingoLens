@@ -1,9 +1,23 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace TranslatorLive
 {
+    public class WindowTargetInfo
+    {
+        public IntPtr Hwnd;
+        public string ProcessName;
+        public string Title;
+        public override string ToString()
+        {
+            return Title + "  [" + ProcessName + ".exe]";
+        }
+    }
+
     internal static class Native
     {
         public const int WM_NCCALCSIZE = 0x0083;
@@ -109,6 +123,120 @@ namespace TranslatorLive
         [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int cmd);
         [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
         [DllImport("dwmapi.dll")] public static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+        public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+        [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+        [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+
+        public static List<WindowTargetInfo> ListOpenWindows()
+        {
+            List<WindowTargetInfo> list = new List<WindowTargetInfo>();
+            int myPid = 0;
+            try { myPid = Process.GetCurrentProcess().Id; } catch { }
+
+            EnumWindows(delegate(IntPtr hWnd, IntPtr lParam)
+            {
+                try
+                {
+                    if (!IsWindowVisible(hWnd)) return true;
+                    int len = GetWindowTextLength(hWnd);
+                    if (len <= 0) return true;
+                    StringBuilder sb = new StringBuilder(len + 1);
+                    GetWindowText(hWnd, sb, sb.Capacity);
+                    string title = sb.ToString().Trim();
+                    if (string.IsNullOrEmpty(title)) return true;
+                    if (title == "Program Manager" || title == "Settings" || title == "Windows Input Experience") return true;
+
+                    uint pid;
+                    GetWindowThreadProcessId(hWnd, out pid);
+                    if ((int)pid == myPid) return true;
+
+                    string procName = "";
+                    try
+                    {
+                        using (Process p = Process.GetProcessById((int)pid))
+                            procName = p.ProcessName;
+                    }
+                    catch { }
+                    if (string.IsNullOrEmpty(procName)) return true;
+                    if (string.Equals(procName, "TextInputHost", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(procName, "ApplicationFrameHost", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Keep ApplicationFrameHost only if title is meaningful
+                        if (string.Equals(procName, "TextInputHost", StringComparison.OrdinalIgnoreCase)) return true;
+                    }
+
+                    list.Add(new WindowTargetInfo { Hwnd = hWnd, ProcessName = procName, Title = title });
+                }
+                catch { }
+                return true;
+            }, IntPtr.Zero);
+
+            return list;
+        }
+
+        public static bool IsTargetWindowForeground(string targetProcess, string targetTitle)
+        {
+            if (string.IsNullOrWhiteSpace(targetProcess) && string.IsNullOrWhiteSpace(targetTitle))
+                return true; // Global / unlocked mode
+
+            try
+            {
+                IntPtr fg = GetForegroundWindow();
+                if (fg == IntPtr.Zero) return false;
+
+                uint pid;
+                GetWindowThreadProcessId(fg, out pid);
+                string fgProc = "";
+                try
+                {
+                    using (Process p = Process.GetProcessById((int)pid))
+                        fgProc = p.ProcessName;
+                }
+                catch { }
+
+                if (!string.IsNullOrWhiteSpace(targetProcess) &&
+                    !string.Equals(fgProc, targetProcess.Trim(), StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
+                // If user locked a browser/player window (like Chrome/Edge/VLC), also check title fragment so switching tabs/other browser windows stops OCR!
+                if (!string.IsNullOrWhiteSpace(targetTitle))
+                {
+                    bool isBrowserOrPlayer =
+                        string.Equals(fgProc, "chrome", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(fgProc, "msedge", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(fgProc, "firefox", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(fgProc, "brave", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(fgProc, "opera", StringComparison.OrdinalIgnoreCase);
+
+                    if (isBrowserOrPlayer)
+                    {
+                        int len = GetWindowTextLength(fg);
+                        string fgTitle = "";
+                        if (len > 0)
+                        {
+                            StringBuilder sb = new StringBuilder(len + 1);
+                            GetWindowText(fg, sb, sb.Capacity);
+                            fgTitle = sb.ToString();
+                        }
+                        // Strip volatile YouTube notification prefix like "(217) " from both titles so lock NEVER breaks when a notification arrives!
+                        string cleanTarget = System.Text.RegularExpressions.Regex.Replace(targetTitle, @"^\(\d+\)\s*", "").Trim();
+                        string cleanFg = System.Text.RegularExpressions.Regex.Replace(fgTitle, @"^\(\d+\)\s*", "").Trim();
+                        string needle = cleanTarget.Length > 16 ? cleanTarget.Substring(0, 16) : cleanTarget;
+                        if (!string.IsNullOrEmpty(needle) && cleanFg.IndexOf(needle, StringComparison.OrdinalIgnoreCase) < 0)
+                            return false;
+                    }
+                }
+                return true;
+            }
+            catch { return true; }
+        }
 
         public static float DpiScale(IntPtr hwnd)
         {

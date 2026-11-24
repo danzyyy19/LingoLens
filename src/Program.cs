@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
@@ -12,9 +13,9 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Danzyyy")]
 [assembly: AssemblyProduct("LingoLens")]
 [assembly: AssemblyCopyright("Copyright © 2026 Danzyyy")]
-[assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.0.0")]
-[assembly: AssemblyInformationalVersion("0.2 Beta")]
+[assembly: AssemblyVersion("0.3.0.0")]
+[assembly: AssemblyFileVersion("0.3.0.0")]
+[assembly: AssemblyInformationalVersion("0.3 Beta")]
 
 namespace TranslatorLive
 {
@@ -29,6 +30,33 @@ namespace TranslatorLive
             catch { try { Native.SetProcessDPIAware(); } catch { } }
         }
 
+        private static void TakeOverExistingInstances()
+        {
+            try
+            {
+                int myPid = System.Diagnostics.Process.GetCurrentProcess().Id;
+                foreach (System.Diagnostics.Process p in System.Diagnostics.Process.GetProcesses())
+                {
+                    try
+                    {
+                        if (p.Id == myPid) continue;
+                        string n = (p.ProcessName ?? "").ToLowerInvariant();
+                        if (n.StartsWith("lingolens") || n.StartsWith("translatorlive"))
+                        {
+                            try { p.CloseMainWindow(); } catch { }
+                            if (!p.WaitForExit(350))
+                            {
+                                try { p.Kill(); p.WaitForExit(500); } catch { }
+                            }
+                        }
+                    }
+                    catch { }
+                    finally { try { p.Dispose(); } catch { } }
+                }
+            }
+            catch { }
+        }
+
         [STAThread]
         static int Main(string[] args)
         {
@@ -40,6 +68,9 @@ namespace TranslatorLive
             {
                 return RunSelfTest();
             }
+
+            // Guarantee ONLY ONE LingoLens instance runs (auto-closes any old tray instance so hotkeys, status & history never desync!)
+            TakeOverExistingInstances();
 
             AppConfig cfg = AppConfig.Load();
             Application.Run(new MainWindow(cfg));
@@ -220,6 +251,229 @@ namespace TranslatorLive
                             return 1;
                         }
 
+                        // Test v0.3 Indonesian Gaul Mode (Gue/Lo, gak, udah, banget, temen, liat, tau)
+                        string gaul1 = TranslationEngine.NaturalizeIndonesian("Apakah Anda tidak tahu di mana teman saya? Saya sangat lelah dan harus cepat melihat mereka.", "id", 0);
+                        LogTest("[GAUL-MODE] " + gaul1);
+                        if (!gaul1.ToLowerInvariant().Contains("lo") || !gaul1.ToLowerInvariant().Contains("gue") ||
+                            !gaul1.ToLowerInvariant().Contains("gak tau") || !gaul1.ToLowerInvariant().Contains("capek") ||
+                            gaul1.ToLowerInvariant().Contains("anda") || gaul1.ToLowerInvariant().Contains("saya"))
+                        {
+                            LogTest("[FAIL] Gaul mode test failed: " + gaul1);
+                            return 1;
+                        }
+
+                        // Test v0.3 Fuzzy Glossary OCR Auto-Repair
+                        string fuzzyIn = "Linh must reach Hyrulc Castle before Ganondrof steals the Trlforce.";
+                        string fuzzyFixed = TranslationEngine.RepairOcrWithGlossary(fuzzyIn, "Link;Hyrule;Ganondorf;Triforce");
+                        LogTest("[GLOSSARY-FUZZY] " + fuzzyFixed);
+                        if (!fuzzyFixed.Contains("Link") || !fuzzyFixed.Contains("Hyrule") || !fuzzyFixed.Contains("Triforce"))
+                        {
+                            LogTest("[FAIL] Glossary fuzzy repair failed: " + fuzzyFixed);
+                            return 1;
+                        }
+
+                        // Test v0.3 Anti-Flip-Flop Lock (moving background drops/corrupts 1 word on static instant subtitle)
+                        bool sameSub, expansion;
+                        TranslationEngine.AnalyzeSubtitleRelation(
+                            "we need to find the master sword before dark falls",
+                            "we need to flnd the master sword before dark",
+                            true, out sameSub, out expansion);
+                        LogTest("[ANTI-FLIPFLOP] sameSub=" + sameSub + " expansion=" + expansion);
+                        if (!sameSub || expansion)
+                        {
+                            LogTest("[FAIL] Anti-flip-flop lock failed to lock noisy variation of same instant subtitle!");
+                            return 1;
+                        }
+
+                        // Test v0.4 Real User Thin-Font Repair (Delcu -> Deku, talce -> take, fib Din -> Din, uOHMA/Nisciorn rejected)
+                        string thinFix1 = TranslationEngine.CleanGameOcrText("The Great Delcu Tree asked you to talce the sword.", "en");
+                        string thinFix2 = TranslationEngine.CleanGameOcrText("fib Din, the goddess of power.", "en");
+                        string glossDelcu = TranslationEngine.RepairOcrWithGlossary("The Great Delcu Tree is calling.", "Great Deku Tree;Deku;Link;Hyrule");
+                        LogTest("[V04-THINFONT] " + thinFix1 + " | " + thinFix2 + " | " + glossDelcu);
+                        if (!thinFix1.Contains("Deku") || !thinFix1.Contains("take") || !thinFix2.StartsWith("Din,") || !glossDelcu.Contains("Deku"))
+                        {
+                            LogTest("[FAIL] v0.4 thin-font split-letter repair failed!");
+                            return 1;
+                        }
+                        if (TranslationEngine.IsMeaningfulSubtitle("uOHMA", "en") || TranslationEngine.IsMeaningfulSubtitle("Nisciorn", "en"))
+                        {
+                            LogTest("[FAIL] v0.4 hallucination filter failed to reject uOHMA / Nisciorn!");
+                            return 1;
+                        }
+
+                        // Test v0.7 Temporal 2-Frame Background Eraser (static borderless subtitle over chaotic moving bright 3D sparks/bars!)
+                        using (Bitmap f1 = new Bitmap(960, 140, PixelFormat.Format32bppArgb))
+                        using (Bitmap f2 = new Bitmap(960, 140, PixelFormat.Format32bppArgb))
+                        {
+                            for (int fi = 0; fi < 2; fi++)
+                            {
+                                using (Graphics gT = Graphics.FromImage(fi == 0 ? f1 : f2))
+                                {
+                                    gT.Clear(Color.FromArgb(24, 34, 48));
+                                    // Draw bright moving 3D glare/sparks at DIFFERENT positions in f1 vs f2!
+                                    int shift = fi * 95;
+                                    using (SolidBrush brGlow = new SolidBrush(Color.FromArgb(210, 235, 245, 255)))
+                                    {
+                                        for (int k = 0; k < 6; k++)
+                                            gT.FillEllipse(brGlow, (k * 165 + shift) % 920, 16 + (k * 19) % 70, 58, 42);
+                                    }
+                                    gT.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+                                    using (Font tf = new Font("Segoe UI", 28f, FontStyle.Regular, GraphicsUnit.Pixel))
+                                    {
+                                        gT.DrawString("Together, you and the princess must protect this world.", tf, Brushes.Black, 34f, 52f);
+                                        gT.DrawString("Together, you and the princess must protect this world.", tf, Brushes.White, 32f, 50f);
+                                    }
+                                }
+                            }
+                            byte[] b1 = TranslationEngine.CopyBitmapToTightBgra(f1);
+                            byte[] b2 = TranslationEngine.CopyBitmapToTightBgra(f2);
+                            bool uoT, chT; string errT;
+                            System.Diagnostics.Stopwatch swT = System.Diagnostics.Stopwatch.StartNew();
+                            string tRaw = eng.RecognizeBitmapWithTemporal(f2, b2, b1, "en", true, out uoT, out chT, out errT);
+                            long tMs = swT.ElapsedMilliseconds;
+                            string tNorm = TranslationEngine.NormalizeText(tRaw, "en", true);
+                            LogTest("[V07-TEMPORAL] (" + tMs + "ms OCR) '" + tNorm + "'");
+                            if (!tNorm.Contains("Together") || !tNorm.Contains("princess") || !tNorm.Contains("protect"))
+                            {
+                                LogTest("[FAIL] v0.7 Temporal 2-Frame Background Eraser failed: " + tNorm);
+                                return 1;
+                            }
+                        }
+
+                        // Test v0.7 Garbage Gate rejects real fade-in / 3D-noise junk from user log (< 68)
+                        int badScore1 = TranslationEngine.ScoreOcrQuality("a effi'hTIet's make good our promisetONabooru.u", "en");
+                        int badScore2 = TranslationEngine.ScoreOcrQuality("Together...you and•the princess•e mustiprotect", "en");
+                        int badScore3 = TranslationEngine.ScoreOcrQuality("you truly expect that {uch juv nile tricksw uld foolr e?", "en");
+                        LogTest("[V07-GARBAGE-GATE] scores=" + badScore1 + "," + badScore2 + "," + badScore3);
+                        if (badScore1 >= 68 || badScore2 >= 68 || badScore3 >= 68)
+                        {
+                            LogTest("[FAIL] v0.7 Garbage Gate failed to reject corrupted OCR lines!");
+                            return 1;
+                        }
+
+                        // Test v0.8 FULL 10-FRAME ANIMATED CUTSCENE STRESS TEST inside user's REAL 1758x319 wide ROI!
+                        // Verifies:
+                        //  1. Fade-in frame (35% opacity) does NOT emit garbage
+                        //  2. Moving 3D bright glare behind static Subtitle A emits ZERO flip-flops
+                        //  3. 1-frame camera flash does NOT wipe lock or re-trigger Subtitle A
+                        //  4. Brand-new Subtitle B is NOT erased by Temporal Eraser and cleanly replaces A ONCE!
+                        {
+                            eng.ClearState();
+                            List<ScanUpdateEventArgs> cutsceneEvents = new List<ScanUpdateEventArgs>();
+                            EventHandler<ScanUpdateEventArgs> handler = delegate(object sObj, ScanUpdateEventArgs ev)
+                            {
+                                if (!ev.IsError && !string.IsNullOrEmpty(ev.TranslatedText))
+                                    cutsceneEvents.Add(ev);
+                            };
+                            eng.OnAreaTranslated += handler;
+                            try
+                            {
+                                string subA = "Together, you and the princess must protect Hyrule.";
+                                string subB = "I have been waiting for you at the Temple of Time.";
+                                for (int stepIdx = 0; stepIdx <= 10; stepIdx++)
+                                {
+                                    using (Bitmap wideFrame = new Bitmap(1758, 319, PixelFormat.Format32bppArgb))
+                                    {
+                                        using (Graphics gw = Graphics.FromImage(wideFrame))
+                                        {
+                                            if (stepIdx == 6)
+                                            {
+                                                // Frame 6: 1-frame bright white camera flash (transient empty OCR!)
+                                                gw.Clear(Color.FromArgb(245, 245, 245));
+                                            }
+                                            else
+                                            {
+                                                gw.Clear(Color.FromArgb(22, 30, 42));
+                                                // Moving chaotic 3D glare/sparks shifting every frame across the wide 1758x319 ROI
+                                                int shift = stepIdx * 137;
+                                                using (SolidBrush brGlow = new SolidBrush(Color.FromArgb(205, 230, 242, 255)))
+                                                {
+                                                    for (int k = 0; k < 8; k++)
+                                                        gw.FillEllipse(brGlow, (k * 230 + shift) % 1680, 20 + (k * 37 + stepIdx * 19) % 240, 72, 48);
+                                                }
+                                                if (stepIdx >= 1)
+                                                {
+                                                    string txtToDraw = (stepIdx <= 7) ? subA : subB;
+                                                    int alpha = (stepIdx == 1) ? 85 : 255; // Frame 1 = 33% fade-in!
+                                                    gw.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+                                                    using (Font wf = new Font("Segoe UI", 28f, FontStyle.Regular, GraphicsUnit.Pixel))
+                                                    using (SolidBrush shBr = new SolidBrush(Color.FromArgb(alpha, 0, 0, 0)))
+                                                    using (SolidBrush txBr = new SolidBrush(Color.FromArgb(alpha, 255, 255, 255)))
+                                                    {
+                                                        gw.DrawString(txtToDraw, wf, shBr, 482f, 178f);
+                                                        gw.DrawString(txtToDraw, wf, txBr, 480f, 176f);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        eng.ProcessCapturedFrame(99, wideFrame, AreaTextMode.Dialog, "en", "id", "google", "",
+                                            "Hyrule;Temple of Time;Link;Zelda", "Zelda", "", 0, true, true, false, true, true, 8, false);
+                                    }
+                                }
+                            }
+                            finally
+                            {
+                                eng.OnAreaTranslated -= handler;
+                            }
+
+                            LogTest("[V08-CUTSCENE-10FRAME] emitted=" + cutsceneEvents.Count);
+                            foreach (ScanUpdateEventArgs cev in cutsceneEvents)
+                                LogTest("   -> OCR='" + cev.SourceText + "' | TRANS='" + cev.TranslatedText + "' (" + cev.StatusMessage + ")");
+
+                            if (cutsceneEvents.Count != 2 ||
+                                !cutsceneEvents[0].SourceText.Contains("princess") ||
+                                !cutsceneEvents[1].SourceText.Contains("Temple of Time"))
+                            {
+                                LogTest("[FAIL] v0.8 10-frame 1758x319 cutscene stability test failed! Expected exactly 2 clean emissions, got " + cutsceneEvents.Count);
+                                return 1;
+                            }
+                        }
+
+                        // Test v0.4 Real Uploaded Game Cutscene Screenshots if present on disk!
+                        string[] realShots = new string[]
+                        {
+                            @"C:\Users\Dani\.gemini\antigravity\brain\f1951b95-e57d-4f5a-9b45-5671968a81d6\.user_uploaded\media_1795455412540_da9d6a34.jpg",
+                            @"C:\Users\Dani\.gemini\antigravity\brain\f1951b95-e57d-4f5a-9b45-5671968a81d6\.user_uploaded\media_1795455674242_d44a8d00.jpg"
+                        };
+                        foreach (string rsPath in realShots)
+                        {
+                            if (File.Exists(rsPath))
+                            {
+                                using (Bitmap fullImg = new Bitmap(rsPath))
+                                {
+                                    // Crop wide realistic bottom subtitle zone (y = 66%..93%, x = 8%..92% -> wide noisy ROI!)
+                                    Rectangle subCrop = new Rectangle(fullImg.Width * 8 / 100, fullImg.Height * 66 / 100, fullImg.Width * 84 / 100, fullImg.Height * 27 / 100);
+                                    using (Bitmap cropped = fullImg.Clone(subCrop, PixelFormat.Format32bppArgb))
+                                    {
+                                        System.Diagnostics.Stopwatch swR = System.Diagnostics.Stopwatch.StartNew();
+                                        bool uo; string oe;
+                                        string rRaw = eng.RecognizeBitmap(cropped, "en", out uo, out oe);
+                                        long rOcrMs = swR.ElapsedMilliseconds;
+                                        string rNorm = TranslationEngine.NormalizeText(rRaw, "en", true);
+                                        rNorm = TranslationEngine.RepairOcrWithGlossary(rNorm, "Great Deku Tree;Deku;Farore;Nayru;Din;Hyrule;Link;Navi");
+                                        string rProv, rErr;
+                                        string rTr = eng.TranslateText(rNorm, "en", "id", "google", "", 0, out rProv, out rErr, "Great Deku Tree;Deku;Farore;Nayru;Din;Hyrule;Link;Navi");
+                                        swR.Stop();
+                                        LogTest("[REAL-SHOT-WIDE] (" + cropped.Width + "x" + cropped.Height + ", " + rOcrMs + "ms OCR, " + swR.ElapsedMilliseconds + "ms Total, " + rProv + ") '" + rNorm + "' -> '" + rTr + "'");
+                                        if (string.IsNullOrEmpty(rNorm) || rNorm.Length < 15)
+                                        {
+                                            LogTest("[FAIL] Real wide-crop screenshot OCR failed on " + Path.GetFileName(rsPath));
+                                            return 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Test v0.3 GameLoreService offline presets
+                        var presets = GameLoreService.GetPresets();
+                        if (presets.Count < 10 || GameLoreService.FindPreset("zelda") == null)
+                        {
+                            LogTest("[FAIL] GameLoreService presets check failed.");
+                            return 1;
+                        }
+                        LogTest("[GAME-LORE] Loaded " + presets.Count + " built-in game lore presets.");
+
                         string glossTr = eng.TranslateText("Protect the Triforce in Hyrule!", "en", "id", "google", "", true, out prov, out terr, "Hyrule;Triforce");
                         LogTest("[GLOSSARY] '" + glossTr + "'");
                         if (!glossTr.Contains("Triforce") || !glossTr.Contains("Hyrule"))
@@ -278,7 +532,6 @@ namespace TranslatorLive
                 string brainDir = @"C:\Users\danic\.gemini\antigravity\brain\a4be1715-04e8-4b64-be13-1a44e8d8f78d";
                 using (MainWindow w = new MainWindow(new AppConfig()))
                 {
-                    w.Size = new Size(1080, 730);
                     w.Show();
 
                     // Dark Mode Live Tab
@@ -315,6 +568,10 @@ namespace TranslatorLive
                     w.SetPreviewState(3, true); w.Refresh();
                     SaveShot(w, Path.Combine(outDir, "minimalist_dark_changelog.png"));
                     if (Directory.Exists(brainDir)) SaveShot(w, Path.Combine(brainDir, "minimalist_dark_changelog.png"));
+
+                    float auditDpi = 1.0f;
+                    try { uint d = Native.GetDpiForSystem(); if (d >= 96) auditDpi = Math.Max(1.0f, Math.Min(2.25f, d / 96f)); } catch { }
+                    Modals.RenderAuditScreenshots(outDir, auditDpi);
 
                     w.Close();
                 }

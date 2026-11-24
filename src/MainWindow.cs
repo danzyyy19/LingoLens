@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Text;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 
 namespace TranslatorLive
@@ -98,8 +99,9 @@ namespace TranslatorLive
         };
 
         private readonly List<string> _fonts = new List<string>();
+        private float _dpiScale = 1.0f;
 
-        private float Z { get { return Math.Max(0.75f, Math.Min(1.50f, _cfg.UiZoom / 100f)); } }
+        private float Z { get { return Math.Max(0.80f, Math.Min(2.40f, _dpiScale * (_cfg.UiZoom / 100f))); } }
         private float S(float v) { return (float)Math.Round(v * Z); }
         private RectangleF SR(float x, float y, float w, float h)
         {
@@ -109,6 +111,13 @@ namespace TranslatorLive
         public MainWindow(AppConfig cfg)
         {
             _cfg = cfg;
+            try
+            {
+                uint sysDpi = Native.GetDpiForSystem();
+                if (sysDpi >= 96) _dpiScale = Math.Max(1.0f, Math.Min(2.25f, sysDpi / 96f));
+            }
+            catch { _dpiScale = 1.0f; }
+
             if (_cfg.Areas.Count == 0)
             {
                 Rectangle pri = Screen.PrimaryScreen.Bounds;
@@ -127,8 +136,11 @@ namespace TranslatorLive
             Text = "LingoLens — by Danzyyy";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(1080, 740);
-            MinimumSize = new Size(760, 520);
+            Rectangle scrInit = Screen.PrimaryScreen.WorkingArea;
+            int initW = Math.Min((int)Math.Round(1180 * _dpiScale), scrInit.Width * 92 / 100);
+            int initH = Math.Min((int)Math.Round(790 * _dpiScale), scrInit.Height * 92 / 100);
+            Size = new Size(Math.Max(860, initW), Math.Max(600, initH));
+            MinimumSize = new Size((int)Math.Round(780 * _dpiScale), (int)Math.Round(540 * _dpiScale));
             DoubleBuffered = true;
             KeyPreview = true;
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
@@ -160,6 +172,25 @@ namespace TranslatorLive
 
             _engine = new TranslationEngine(_cfg);
             _engine.OnAreaTranslated += OnEngineAreaTranslated;
+            _engine.OnTargetWindowActiveChanged += delegate(bool active)
+            {
+                try
+                {
+                    if (IsHandleCreated && !IsDisposed)
+                    {
+                        BeginInvoke((Action)delegate
+                        {
+                            _overlay.SetTargetPaused(!active);
+                            if (!active && !string.IsNullOrEmpty(_cfg.TargetProcessName))
+                                _liveStatus = T("Siaga · Menunggu jendela " + _cfg.TargetProcessName, "Armed · Waiting for " + _cfg.TargetProcessName);
+                            else if (active)
+                                _liveStatus = T("Aktif · " + _cfg.TargetProcessName, "Active · " + _cfg.TargetProcessName);
+                            Invalidate();
+                        });
+                    }
+                }
+                catch { }
+            };
 
             _toastTimer = new Timer { Interval = 2400 };
             _toastTimer.Tick += delegate { _toastText = ""; _toastTimer.Stop(); Invalidate(); };
@@ -270,6 +301,8 @@ namespace TranslatorLive
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            float winDpi = Native.DpiScale(Handle);
+            if (winDpi >= 1.0f) _dpiScale = Math.Min(2.25f, winDpi);
             ApplyDwm();
             RegisterHotkeys();
             if (_cfg.AutoLive) ToggleLive();
@@ -442,13 +475,13 @@ namespace TranslatorLive
 
         public void AdjustZoom(int delta)
         {
-            int next = Math.Max(75, Math.Min(150, _cfg.UiZoom + delta));
+            int next = Math.Max(80, Math.Min(175, _cfg.UiZoom + delta));
             if (next != _cfg.UiZoom)
             {
                 _cfg.UiZoom = next;
                 _cfg.Save();
                 _scrollY = 0f;
-                ShowToast("Zoom " + next + "%", Color.FromArgb(16, 185, 129));
+                ShowToast("Zoom " + next + "%", Palette.For(_cfg.Dark).Live);
                 Invalidate();
             }
         }
@@ -634,142 +667,91 @@ namespace TranslatorLive
 
         private void PromptSaveGameProfile()
         {
-            using (Form dlg = new Form())
+            Palette pal = Palette.For(_cfg.Dark);
+            using (Form dlg = Modals.BuildSaveProfileModal(_cfg, _dpiScale, pal, _cfg.UiLang == "en", delegate
             {
-                dlg.Text = "Simpan Template Game";
-                dlg.Size = new Size(400, 175);
-                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dlg.MaximizeBox = false;
-                dlg.MinimizeBox = false;
-                dlg.StartPosition = FormStartPosition.CenterParent;
-                dlg.BackColor = _cfg.Dark ? Color.FromArgb(18, 18, 20) : Color.FromArgb(248, 249, 250);
-                dlg.ForeColor = _cfg.Dark ? Color.FromArgb(244, 244, 245) : Color.FromArgb(24, 24, 27);
-
-                Label lbl = new Label { Text = "Nama Game (mis. Zelda Ocarina of Time):", Location = new Point(18, 16), AutoSize = true, Font = new Font("Segoe UI", 9.5f) };
-                TextBox tb = new TextBox
-                {
-                    Text = _cfg.ActiveProfile == "Default" ? "" : _cfg.ActiveProfile,
-                    Location = new Point(18, 42),
-                    Size = new Size(346, 26),
-                    Font = new Font("Segoe UI", 10f)
-                };
-                Button okBtn = new Button
-                {
-                    Text = "Simpan Template",
-                    DialogResult = DialogResult.OK,
-                    Location = new Point(234, 86),
-                    Size = new Size(130, 34),
-                    BackColor = _cfg.Dark ? Color.FromArgb(250, 250, 250) : Color.FromArgb(24, 24, 27),
-                    ForeColor = _cfg.Dark ? Color.FromArgb(9, 9, 11) : Color.White,
-                    FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-                };
-                okBtn.FlatAppearance.BorderSize = 0;
-
-                dlg.Controls.Add(lbl); dlg.Controls.Add(tb); dlg.Controls.Add(okBtn);
-                dlg.AcceptButton = okBtn;
-
-                if (dlg.ShowDialog(this) == DialogResult.OK && !string.IsNullOrWhiteSpace(tb.Text))
-                {
-                    _cfg.SaveGameProfile(tb.Text.Trim());
-                    ShowToast("Template \"" + _cfg.ActiveProfile + "\" tersimpan", Color.FromArgb(16, 185, 129));
-                    Invalidate();
-                }
+                ShowToast("Template \"" + _cfg.ActiveProfile + "\" tersimpan", pal.Live);
+                Invalidate();
+            }))
+            {
+                dlg.ShowDialog(this);
             }
         }
 
         private void PromptGeminiKey()
         {
-            using (Form dlg = new Form())
+            Palette pal = Palette.For(_cfg.Dark);
+            using (Form dlg = Modals.BuildGeminiKeyModal(_cfg, _dpiScale, pal, _cfg.UiLang == "en", delegate
             {
-                dlg.Text = "Gemini AI API Key (Opsional)";
-                dlg.Size = new Size(440, 175);
-                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dlg.MaximizeBox = false;
-                dlg.MinimizeBox = false;
-                dlg.StartPosition = FormStartPosition.CenterParent;
-                dlg.BackColor = _cfg.Dark ? Color.FromArgb(18, 18, 20) : Color.FromArgb(248, 249, 250);
-                dlg.ForeColor = _cfg.Dark ? Color.FromArgb(244, 244, 245) : Color.FromArgb(24, 24, 27);
-
-                Label lbl = new Label { Text = "Masukkan Google Gemini API Key (untuk terjemahan AI kontekstual):", Location = new Point(18, 16), AutoSize = true, Font = new Font("Segoe UI", 9f) };
-                TextBox tb = new TextBox { Text = _cfg.GeminiApiKey, Location = new Point(18, 42), Size = new Size(386, 26), Font = new Font("Segoe UI", 9.5f) };
-                Button okBtn = new Button
-                {
-                    Text = "Simpan Key",
-                    DialogResult = DialogResult.OK,
-                    Location = new Point(284, 86),
-                    Size = new Size(120, 34),
-                    BackColor = _cfg.Dark ? Color.FromArgb(250, 250, 250) : Color.FromArgb(24, 24, 27),
-                    ForeColor = _cfg.Dark ? Color.FromArgb(9, 9, 11) : Color.White,
-                    FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-                };
-                okBtn.FlatAppearance.BorderSize = 0;
-                dlg.Controls.Add(lbl); dlg.Controls.Add(tb); dlg.Controls.Add(okBtn);
-                dlg.AcceptButton = okBtn;
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    _cfg.GeminiApiKey = tb.Text.Trim();
-                    if (!string.IsNullOrEmpty(_cfg.GeminiApiKey)) _cfg.Engine = "gemini";
-                    _cfg.Save();
-                    _engine.ForceScanNow();
-                    ShowToast("Gemini API Key disimpan", Color.FromArgb(16, 185, 129));
-                    Invalidate();
-                }
+                _engine.ForceScanNow();
+                ShowToast("Gemini API Key disimpan", pal.Live);
+                Invalidate();
+            }))
+            {
+                dlg.ShowDialog(this);
             }
         }
 
         private void PromptGlossary()
         {
-            using (Form dlg = new Form())
+            Palette pal = Palette.For(_cfg.Dark);
+            using (Form dlg = Modals.BuildGlossaryModal(_cfg, _dpiScale, pal, _cfg.UiLang == "en", delegate
             {
-                dlg.Text = "Glosarium & Kamus Nama Karakter";
-                dlg.Size = new Size(460, 310);
-                dlg.FormBorderStyle = FormBorderStyle.FixedDialog;
-                dlg.MaximizeBox = false;
-                dlg.MinimizeBox = false;
-                dlg.StartPosition = FormStartPosition.CenterParent;
-                dlg.BackColor = _cfg.Dark ? Color.FromArgb(18, 18, 20) : Color.FromArgb(248, 249, 250);
-                dlg.ForeColor = _cfg.Dark ? Color.FromArgb(244, 244, 245) : Color.FromArgb(24, 24, 27);
+                _engine.ClearState();
+                _engine.ForceScanNow();
+                ShowToast("Glosarium game disimpan", pal.Live);
+                Invalidate();
+            }))
+            {
+                dlg.ShowDialog(this);
+            }
+        }
 
-                Label lbl = new Label
+        private void PromptGameLorePicker()
+        {
+            Palette pal = Palette.For(_cfg.Dark);
+            using (Form dlg = Modals.BuildGameLoreModal(_cfg, _dpiScale, pal, _cfg.UiLang == "en", delegate
+            {
+                _engine.ClearState();
+                _engine.ForceScanNow();
+                ShowToast("Game aktif: " + (string.IsNullOrEmpty(_cfg.ActiveGameTitle) ? "Umum" : _cfg.ActiveGameTitle), pal.Live);
+                Invalidate();
+            }))
+            {
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void PromptDialogBacklog()
+        {
+            Palette pal = Palette.For(_cfg.Dark);
+            using (Form dlg = Modals.BuildDialogBacklogModal(_engine.GetDialogHistory(), _dpiScale, pal, _cfg.UiLang == "en",
+                delegate { _engine.ClearDialogHistory(); },
+                delegate { ShowToast("Riwayat disalin", pal.Live); }))
+            {
+                dlg.ShowDialog(this);
+            }
+        }
+
+        private void PromptWindowLockPicker()
+        {
+            Palette pal = Palette.For(_cfg.Dark);
+            using (Form dlg = Modals.BuildWindowLockModal(_cfg, _dpiScale, pal, _cfg.UiLang == "en", delegate
+            {
+                if (string.IsNullOrEmpty(_cfg.TargetProcessName))
                 {
-                    Text = "Masukkan nama karakter, lokasi, atau istilah khusus (1 per baris atau pisah ';').\nGunakan '=' untuk terjemahan khusus (contoh: Master Sword=Pedang Master):",
-                    Location = new Point(18, 14),
-                    Size = new Size(410, 36),
-                    Font = new Font("Segoe UI", 8.8f)
-                };
-                TextBox tb = new TextBox
-                {
-                    Text = (_cfg.Glossary ?? "").Replace(";", "\r\n"),
-                    Multiline = true,
-                    ScrollBars = ScrollBars.Vertical,
-                    Location = new Point(18, 56),
-                    Size = new Size(406, 154),
-                    Font = new Font("Segoe UI", 9.5f)
-                };
-                Button okBtn = new Button
-                {
-                    Text = "Simpan Glosarium",
-                    DialogResult = DialogResult.OK,
-                    Location = new Point(274, 222),
-                    Size = new Size(150, 36),
-                    BackColor = _cfg.Dark ? Color.FromArgb(250, 250, 250) : Color.FromArgb(24, 24, 27),
-                    ForeColor = _cfg.Dark ? Color.FromArgb(9, 9, 11) : Color.White,
-                    FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI", 9.5f, FontStyle.Bold)
-                };
-                okBtn.FlatAppearance.BorderSize = 0;
-                dlg.Controls.Add(lbl); dlg.Controls.Add(tb); dlg.Controls.Add(okBtn);
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    _cfg.Glossary = tb.Text.Replace("\r\n", ";").Replace("\n", ";").Trim(';', ' ');
-                    _cfg.Save();
-                    _engine.ClearState();
-                    _engine.ForceScanNow();
-                    ShowToast("Glosarium game disimpan", Color.FromArgb(16, 185, 129));
-                    Invalidate();
+                    _overlay.SetTargetPaused(false);
+                    ShowToast(T("Kunci jendela dilepas (Semua Layar)", "Window lock cleared"), pal.Live);
                 }
+                else
+                {
+                    ShowToast(T("OCR dikunci ke: ", "Locked OCR to: ") + _cfg.TargetProcessName + ".exe", pal.Live);
+                }
+                _engine.ForceScanNow();
+                Invalidate();
+            }))
+            {
+                dlg.ShowDialog(this);
             }
         }
 
@@ -799,21 +781,22 @@ namespace TranslatorLive
             Palette pal = Palette.For(_cfg.Dark);
             _hits.Clear();
 
-            using (SolidBrush bg = new SolidBrush(pal.Bg)) g.FillRectangle(bg, 0, 0, cw, ch);
+            // Architectural Textured Canvas Background (Diagonal Hatch / Blueprint Grid / Dot Matrix / Solid — ZERO AI-Slop Gradients!)
+            Theme.DrawCanvasBackground(g, pal, new RectangleF(0, 0, cw, ch), _cfg.BgPattern);
 
-            using (Font fSerifLg = Theme.SerifFont(S(22f), true))
-            using (Font fSerifMd = Theme.SerifFont(S(15f), true))
-            using (Font fSec = Theme.UiFont(S(13.5f), true))
-            using (Font fBody = Theme.UiFont(S(13f), false))
-            using (Font fBodyB = Theme.UiFont(S(13f), true))
-            using (Font fSm = Theme.UiFont(S(12f), false))
-            using (Font fSmB = Theme.UiFont(S(12f), true))
-            using (Font fCap = Theme.UiFont(S(11f), true))
+            using (Font fSerifLg = Theme.SerifFont(S(24f), true))
+            using (Font fSerifMd = Theme.SerifFont(S(16.5f), true))
+            using (Font fSec = Theme.UiFont(S(15f), true))
+            using (Font fBody = Theme.UiFont(S(14f), false))
+            using (Font fBodyB = Theme.UiFont(S(14f), true))
+            using (Font fSm = Theme.UiFont(S(13f), false))
+            using (Font fSmB = Theme.UiFont(S(13f), true))
+            using (Font fCap = Theme.UiFont(S(11.8f), true))
             {
-                float sideW = S(224f);
-                float topH = S(44f);
+                float sideW = S(244f);
+                float topH = S(48f);
 
-                // 1. LEFT CLAUDE SIDEBAR
+                // 1. LEFT EDITORIAL SIDEBAR
                 using (SolidBrush sb = new SolidBrush(pal.Sidebar))
                 using (Pen bp = new Pen(pal.Border, 1f))
                 {
@@ -821,7 +804,7 @@ namespace TranslatorLive
                     g.DrawLine(bp, sideW, 0, sideW, ch);
                 }
 
-                RectangleF logo = SR(S(16f), S(14f), S(32f), S(32f));
+                RectangleF logo = SR(S(16f), S(14f), S(36f), S(36f));
                 if (_logoBmp != null)
                 {
                     InterpolationMode prevIm = g.InterpolationMode;
@@ -831,30 +814,31 @@ namespace TranslatorLive
                 }
                 else
                 {
-                    Theme.FillRR(g, logo, S(8f), pal.Dark ? Color.FromArgb(39, 39, 42) : Color.FromArgb(24, 24, 27));
-                    Theme.DrawIcon(g, IconKind.Sparkle, SR(logo.X + S(6f), logo.Y + S(6f), S(20f), S(20f)), Color.White);
+                    Theme.FillRR(g, logo, S(8f), pal.Accent);
+                    Theme.DrawIcon(g, IconKind.Gamepad, SR(logo.X + S(6f), logo.Y + S(6f), S(24f), S(24f)), pal.AccentBtnText, 2f);
                 }
-                Theme.DrawTextLeft(g, "LingoLens", fSerifMd, pal.Text, SR(S(56f), S(14f), sideW - S(62f), S(32f)));
+                Theme.DrawTextLeft(g, "LingoLens", fSerifMd, pal.Text, SR(S(60f), S(13f), sideW - S(68f), S(22f)));
+                Theme.DrawTextLeft(g, "GAMING EDITION", fCap, pal.AccentText, SR(S(60f), S(34f), sideW - S(68f), S(16f)));
 
                 // Hero Live CTA
                 bool live = _engine.IsRunning;
-                RectangleF liveBtn = SR(S(16f), S(64f), sideW - S(32f), S(40f));
+                RectangleF liveBtn = SR(S(16f), S(68f), sideW - S(32f), S(42f));
                 DrawAccentBtn(g, pal, "BTN_LIVE", liveBtn,
                     live ? T("Hentikan Live", "Stop Live") : T("Mulai Live", "Start Live"),
                     live ? IconKind.Stop : IconKind.Play,
                     live ? pal.Danger : pal.Accent,
-                    live ? Color.FromArgb(196, 65, 65) : pal.AccentHover,
-                    fBodyB, S(10f));
+                    live ? Color.FromArgb(215, 55, 45) : pal.AccentHover,
+                    fBodyB, S(9f));
 
                 using (SolidBrush stDot = new SolidBrush(live ? pal.Live : pal.TextMute))
-                    g.FillEllipse(stDot, S(22f), S(112f), S(6f), S(6f));
+                    g.FillEllipse(stDot, S(22f), S(119f), S(7f), S(7f));
                 string statusTxt = live ? (T("Aktif", "Active") + (_lastMs > 0 ? (" · " + _lastMs + " ms") : "")) : "Standby · Alt+E";
-                Theme.DrawTextLeft(g, statusTxt, fSm, live ? pal.Live : pal.TextMute, SR(S(34f), S(106f), sideW - S(48f), S(18f)));
+                Theme.DrawTextLeft(g, statusTxt, fSm, live ? pal.Live : pal.TextMute, SR(S(35f), S(113f), sideW - S(48f), S(20f)));
 
-                // Navigation (4 items including Pembaruan)
+                // Navigation (4 items)
                 string[] navNames = new string[] { T("Live & Area", "Live & Areas"), T("Tampilan", "Appearance"), T("Sistem", "System"), T("Pembaruan", "Changelog") };
                 IconKind[] navIcons = new IconKind[] { IconKind.ScanArea, IconKind.Palette, IconKind.Settings, IconKind.Rocket };
-                float ny = S(130f);
+                float ny = S(138f);
                 float itemH = S(32f);
                 float itemPitch = S(36f);
                 for (int i = 0; i < 4; i++)
@@ -864,22 +848,23 @@ namespace TranslatorLive
                     bool hov = (_hoverId == "TAB_" + i);
                     if (act)
                     {
-                        Theme.FillRR(g, nr, S(8f), pal.Dark ? Color.FromArgb(34, 34, 39) : Color.FromArgb(244, 244, 245));
-                        Theme.DrawRR(g, nr, S(8f), pal.Border, 1f);
+                        Theme.FillRR(g, nr, S(8f), pal.Card);
+                        Theme.DrawRR(g, nr, S(8f), pal.BorderStrong, 1f);
+                        Theme.FillRR(g, SR(nr.X + S(3f), nr.Y + S(6f), S(3.5f), nr.Height - S(12f)), S(1.5f), pal.Accent);
                     }
                     else if (hov)
                     {
                         Theme.FillRR(g, nr, S(8f), pal.CardHover);
                     }
-                    float isz = S(14f);
-                    Theme.DrawIcon(g, navIcons[i], SR(nr.X + S(12f), nr.Y + (nr.Height - isz) * 0.5f, isz, isz),
-                        act ? pal.Text : pal.TextSub, 1.65f);
+                    float isz = S(15f);
+                    Theme.DrawIcon(g, navIcons[i], SR(nr.X + S(13f), nr.Y + (nr.Height - isz) * 0.5f, isz, isz),
+                        act ? pal.AccentText : pal.TextSub, 1.75f);
                     Theme.DrawTextLeft(g, navNames[i], act ? fBodyB : fBody, act ? pal.Text : pal.TextSub,
-                        SR(nr.X + S(34f), nr.Y, nr.Width - S(40f), nr.Height));
+                        SR(nr.X + S(36f), nr.Y, nr.Width - S(42f), nr.Height));
 
                     if (i == 3 && UpdateChecker.Info.HasUpdate)
                     {
-                        float badgeW = S(36f), badgeH = S(16f);
+                        float badgeW = S(36f), badgeH = S(17f);
                         RectangleF badgeR = SR(nr.Right - badgeW - S(8f), nr.Y + (nr.Height - badgeH) * 0.5f, badgeW, badgeH);
                         Theme.FillRR(g, badgeR, badgeH * 0.5f, pal.Accent);
                         Theme.DrawTextCenter(g, "NEW", fCap, pal.AccentBtnText, badgeR);
@@ -888,26 +873,43 @@ namespace TranslatorLive
                     _hits.Add(new Hit { Id = "TAB_" + i, Kind = HitKind.Button, Box = nr, Index = i });
                 }
 
-                // Sidebar Bottom: Zoom + Theme + Tray + Credit "by Danzyyy"
-                float by = Math.Max(ny + 4 * itemPitch + S(8f), ch - S(148f));
-                using (Pen bp = new Pen(pal.Border, 1f)) g.DrawLine(bp, S(16f), by - S(10f), sideW - S(16f), by - S(10f));
+                // Quick Sidebar Shortcuts: Target Window Lock + Game & Lore + Backlog
+                float qy = ny + 4 * itemPitch + S(10f);
+                using (Pen bp = new Pen(pal.Border, 1f)) g.DrawLine(bp, S(16f), qy - S(5f), sideW - S(16f), qy - S(5f));
+                bool isLocked = !string.IsNullOrEmpty(_cfg.TargetProcessName);
+                DrawSidebarBtn(g, pal, "BTN_LOCK_WINDOW", SR(S(12f), qy, sideW - S(24f), S(30f)),
+                    isLocked ? (T("Kunci: ", "Lock: ") + _cfg.TargetProcessName) : T("Kunci Jendela Game", "Lock Game Window"),
+                    IconKind.WindowLock, fSmB);
+                DrawSidebarBtn(g, pal, "BTN_GAME_LORE", SR(S(12f), qy + S(32f), sideW - S(24f), S(30f)),
+                    T("Pilih Game & Lore", "Game & Lore"), IconKind.Book, fSmB);
+                DrawSidebarBtn(g, pal, "BTN_HISTORY", SR(S(12f), qy + S(64f), sideW - S(24f), S(30f)),
+                    T("Riwayat Dialog", "Dialog Backlog"), IconKind.History, fSm);
 
-                RectangleF zoomRow = SR(S(16f), by, sideW - S(32f), S(32f));
+                // Sidebar Bottom (Compact 2-column Theme + Pattern row so footer NEVER clips at 100%-150% zoom!)
+                float by = Math.Max(qy + S(98f), ch - S(140f));
+                using (Pen bp = new Pen(pal.Border, 1f)) g.DrawLine(bp, S(16f), by - S(6f), sideW - S(16f), by - S(6f));
+
+                RectangleF zoomRow = SR(S(16f), by, sideW - S(32f), S(28f));
                 Theme.FillRR(g, zoomRow, S(8f), pal.Well);
                 Theme.DrawRR(g, zoomRow, S(8f), pal.Border, 1f);
-                DrawZoomBtn(g, pal, "ZOOM_OUT", SR(zoomRow.X + S(2f), zoomRow.Y + S(2f), S(34f), zoomRow.Height - S(4f)), IconKind.ZoomOut);
-                DrawZoomBtn(g, pal, "ZOOM_IN", SR(zoomRow.Right - S(36f), zoomRow.Y + S(2f), S(34f), zoomRow.Height - S(4f)), IconKind.ZoomIn);
-                RectangleF zReset = SR(zoomRow.X + S(38f), zoomRow.Y + S(2f), zoomRow.Width - S(76f), zoomRow.Height - S(4f));
+                DrawZoomBtn(g, pal, "ZOOM_OUT", SR(zoomRow.X + S(2f), zoomRow.Y + S(2f), S(30f), zoomRow.Height - S(4f)), IconKind.ZoomOut);
+                DrawZoomBtn(g, pal, "ZOOM_IN", SR(zoomRow.Right - S(32f), zoomRow.Y + S(2f), S(30f), zoomRow.Height - S(4f)), IconKind.ZoomIn);
+                RectangleF zReset = SR(zoomRow.X + S(34f), zoomRow.Y + S(2f), zoomRow.Width - S(68f), zoomRow.Height - S(4f));
                 Theme.DrawTextCenter(g, "Zoom " + _cfg.UiZoom + "%", fCap, pal.TextSub, zReset);
                 _hits.Add(new Hit { Id = "ZOOM_RESET", Kind = HitKind.Button, Box = zReset });
 
-                DrawSidebarBtn(g, pal, "BTN_THEME", SR(S(16f), by + S(38f), sideW - S(32f), S(34f)),
-                    _cfg.Dark ? T("Mode Terang", "Light Mode") : T("Mode Gelap", "Dark Mode"), _cfg.Dark ? IconKind.Sun : IconKind.Moon, fSmB);
+                float halfSide = (sideW - S(38f)) * 0.5f;
+                string[] patNames = new string[] { T("Arsir", "Hatch"), "Grid", "Dot", T("Polos", "Flat") };
+                DrawOutlineBtn(g, pal, "BTN_CYCLE_PATTERN", SR(S(16f), by + S(34f), halfSide, S(30f)),
+                    patNames[Math.Max(0, Math.Min(3, _cfg.BgPattern))], IconKind.Pattern, fCap, S(7f));
+                DrawOutlineBtn(g, pal, "BTN_THEME", SR(S(16f) + halfSide + S(6f), by + S(34f), halfSide, S(30f)),
+                    _cfg.Dark ? T("Terang", "Light") : T("Gelap", "Dark"), _cfg.Dark ? IconKind.Sun : IconKind.Moon, fCap, S(7f));
 
-                DrawSidebarBtn(g, pal, "BTN_TRAY", SR(S(16f), by + S(76f), sideW - S(32f), S(34f)),
-                    T("Sembunyikan ke Tray", "Minimize to Tray"), IconKind.Tray, fSm);
+                DrawSidebarBtn(g, pal, "BTN_TRAY", SR(S(16f), by + S(68f), sideW - S(32f), S(28f)),
+                    T("Sembunyikan ke Tray", "Minimize to Tray"), IconKind.Tray, fCap);
 
-                Theme.DrawTextCenter(g, "v0.2 Beta  •  by Danzyyy", fCap, pal.TextMute, SR(S(16f), ch - S(28f), sideW - S(32f), S(20f)));
+                if (ch - (by + S(100f)) >= S(22f))
+                    Theme.DrawTextCenter(g, "v0.3 Beta  •  by Danzyyy", fCap, pal.TextMute, SR(S(16f), ch - S(26f), sideW - S(32f), S(22f)));
 
                 // 2. TOP WINDOW CHROME BAR
                 float wx = cw - S(10f);
@@ -917,20 +919,24 @@ namespace TranslatorLive
                 wx -= (btnSz + S(2f)); DrawChromeIcon(g, pal, "WIN_FULL", SR(wx, S(6f), btnSz, S(32f)), IconKind.Fullscreen, false);
                 wx -= (btnSz + S(2f)); DrawChromeIcon(g, pal, "WIN_MIN", SR(wx, S(6f), btnSz, S(32f)), IconKind.Minimize, false);
 
-                // Top-left Game Profile Quick Selector Bar
-                float profW = Math.Min(S(210f), Math.Max(S(110f), wx - sideW - S(180f)));
-                RectangleF profDrop = SR(sideW + S(16f), S(6f), profW, S(32f));
+                // Top-left Game Profile Quick Selector Bar + Target Window Lock Pill
+                float profW = Math.Min(S(186f), Math.Max(S(110f), wx - sideW - S(360f)));
+                RectangleF profDrop = SR(sideW + S(16f), S(7f), profW, S(34f));
                 DrawProfilePill(g, pal, profDrop, fSmB);
-                RectangleF saveProf = SR(profDrop.Right + S(6f), S(6f), S(86f), S(32f));
+                RectangleF saveProf = SR(profDrop.Right + S(6f), S(7f), S(88f), S(34f));
                 DrawOutlineBtn(g, pal, "BTN_SAVE_PROFILE", saveProf, T("Simpan", "Save"), IconKind.Save, fCap, S(8f));
 
-                float modeX = saveProf.Right + S(12f);
-                float modeAvail = wx - S(10f) - modeX;
-                if (modeAvail >= S(60f))
+                string lockTxt = string.IsNullOrEmpty(_cfg.TargetProcessName)
+                    ? T("Target: Semua Layar", "Target: All Screens")
+                    : (T("Terkunci: ", "Locked: ") + _cfg.TargetProcessName);
+                float lockW = Math.Min(S(216f), Math.Max(S(136f), wx - saveProf.Right - S(86f)));
+                if (lockW >= S(136f))
                 {
-                    string modeLabel = AppConfig.IsPortableMode ? "Portable" : T("Terinstal", "Installed");
-                    Theme.DrawTextLeft(g, modeLabel + (_isFullscreen ? " • Fullscreen" : ""), fCap, pal.TextMute,
-                        SR(modeX, S(12f), modeAvail, S(20f)));
+                    RectangleF lockBtn = SR(saveProf.Right + S(8f), S(7f), lockW, S(34f));
+                    if (!string.IsNullOrEmpty(_cfg.TargetProcessName))
+                        DrawAccentBtn(g, pal, "BTN_LOCK_WINDOW", lockBtn, lockTxt, IconKind.Target, pal.Live, pal.LiveHover, fCap, S(8f));
+                    else
+                        DrawOutlineBtn(g, pal, "BTN_LOCK_WINDOW", lockBtn, lockTxt, IconKind.WindowLock, fCap, S(8f));
                 }
 
                 // 3. MAIN VIEWPORT
@@ -1095,6 +1101,69 @@ namespace TranslatorLive
                     cy += S(48f);
                 }
             }
+
+            // 1b. ACTIVE GAME & LORE BANNER CARD (Fully Responsive — Zero Overlap & Zero Clipped Lore Text!)
+            bool hasGame = !string.IsNullOrWhiteSpace(_cfg.ActiveGameTitle);
+            int gTerms = GameLoreService.CountTerms(_cfg.Glossary);
+            int histCount = _engine.GetDialogHistory().Count;
+            string histLbl = histCount > 0 ? (T("Riwayat (", "Log (") + histCount + ")") : T("Riwayat", "Log");
+            bool stackGameCard = (w < S(700f));
+            float gameCardH = stackGameCard ? S(138f) : S(104f);
+            RectangleF gameCard = SR(x, cy, w, gameCardH);
+            Theme.DrawCard(g, pal, gameCard, S(12f));
+            Theme.FillRR(g, SR(gameCard.X + S(2f), gameCard.Y + S(12f), S(3.5f), gameCard.Height - S(24f)), S(2f), hasGame ? pal.Accent : pal.BorderStrong);
+
+            string gTitleTxt = hasGame ? _cfg.ActiveGameTitle : T("Pilih Game & Cari Lore Sebelum Main", "Pick a Game & Fetch Lore Before Playing");
+            string gLoreTxt = !string.IsNullOrWhiteSpace(_cfg.GameLoreSummary)
+                ? _cfg.GameLoreSummary.Replace("\r", " ").Replace("\n", " ")
+                : T("Pilih preset game atau ketik judul game apa saja buat tarik lore cerita & glosarium nama karakter otomatis biar OCR dan terjemahan presisi.",
+                    "Select a game or search any title online to auto-load story lore & character glossary for accurate OCR and translation.");
+            if (gLoreTxt.Length > 155) gLoreTxt = gLoreTxt.Substring(0, 152).TrimEnd() + "...";
+
+            string toneBadge = _cfg.ToneMode == 0 ? "GAUL" : (_cfg.ToneMode == 1 ? "SANTAI" : "BAKU");
+            string statBadge = toneBadge + (gTerms > 0 ? (" · " + gTerms + " ISTILAH") : "");
+            float badgeW2 = gTerms > 0 ? S(132f) : S(72f);
+            float btnPickW = S(168f);
+            float btnHistW = histCount > 0 ? S(116f) : S(100f);
+
+            if (!stackGameCard)
+            {
+                float rightBtnsW = btnPickW + btnHistW + S(28f);
+                float gTextW = Math.Max(S(180f), gameCard.Width - rightBtnsW - S(28f));
+
+                Theme.DrawTextLeft(g, gTitleTxt, fSec, pal.Text, SR(gameCard.X + S(18f), gameCard.Y + S(12f), Math.Max(S(100f), gTextW - badgeW2 - S(10f)), S(24f)));
+
+                RectangleF pillR = SR(gameCard.X + S(18f) + gTextW - badgeW2, gameCard.Y + S(13f), badgeW2, S(22f));
+                Theme.FillRR(g, pillR, S(11f), hasGame ? pal.LiveSoft : pal.AccentSoft);
+                Theme.DrawTextCenter(g, statBadge, fCap, hasGame ? pal.Live : pal.AccentText, pillR);
+
+                Theme.DrawTextWrap(g, gLoreTxt, fSm, pal.TextSub, SR(gameCard.X + S(18f), gameCard.Y + S(40f), gTextW, S(54f)));
+
+                DrawAccentBtn(g, pal, "BTN_GAME_LORE", SR(gameCard.Right - btnPickW - S(14f), gameCard.Y + S(33f), btnPickW, S(38f)),
+                    hasGame ? T("Ganti / Cari Lore", "Change / Lore") : T("Pilih Game & Lore", "Pick Game & Lore"),
+                    IconKind.Book, pal.Accent, pal.AccentHover, fSmB, S(8f));
+                DrawOutlineBtn(g, pal, "BTN_HISTORY", SR(gameCard.Right - btnPickW - btnHistW - S(22f), gameCard.Y + S(33f), btnHistW, S(38f)),
+                    histLbl, IconKind.History, fSmB, S(8f));
+            }
+            else
+            {
+                float innerW = gameCard.Width - S(34f);
+                Theme.DrawTextLeft(g, gTitleTxt, fSec, pal.Text, SR(gameCard.X + S(18f), gameCard.Y + S(11f), Math.Max(S(100f), innerW - badgeW2 - S(8f)), S(24f)));
+
+                RectangleF pillR = SR(gameCard.Right - S(14f) - badgeW2, gameCard.Y + S(12f), badgeW2, S(22f));
+                Theme.FillRR(g, pillR, S(11f), hasGame ? pal.LiveSoft : pal.AccentSoft);
+                Theme.DrawTextCenter(g, statBadge, fCap, hasGame ? pal.Live : pal.AccentText, pillR);
+
+                Theme.DrawTextWrap(g, gLoreTxt, fSm, pal.TextSub, SR(gameCard.X + S(18f), gameCard.Y + S(38f), innerW, S(44f)));
+
+                DrawAccentBtn(g, pal, "BTN_GAME_LORE", SR(gameCard.X + S(18f), gameCard.Bottom - S(46f), btnPickW, S(34f)),
+                    hasGame ? T("Ganti / Cari Lore", "Change / Lore") : T("Pilih Game & Lore", "Pick Game & Lore"),
+                    IconKind.Book, pal.Accent, pal.AccentHover, fSmB, S(8f));
+                DrawOutlineBtn(g, pal, "BTN_HISTORY", SR(gameCard.X + S(18f) + btnPickW + S(8f), gameCard.Bottom - S(46f), btnHistW, S(34f)),
+                    histLbl, IconKind.History, fSmB, S(8f));
+            }
+
+            cy += gameCardH + S(14f);
 
             // 2. Responsive Row 1: Action buttons & Placement Mode pill
             float pmW = S(248f);
@@ -1432,10 +1501,9 @@ namespace TranslatorLive
                 cy += S(54f);
             }
 
-            // Stage Preview
+            // Stage Preview (Crisp Architectural Studio Stage — Zero AI-Slop Gradients!)
             RectangleF stage = SR(x, cy, w, S(176f));
-            Theme.FillGradRR(g, stage, S(14f), Color.FromArgb(24, 22, 20), Color.FromArgb(36, 33, 29), 120f);
-            Theme.DrawRR(g, stage, S(14f), pal.BorderStrong, 1f);
+            Theme.DrawStudioStage(g, pal, stage, S(12f));
 
             string[] presets = new string[] { T("Sinema", "Cinema"), "Novel", T("Kontras", "Contrast"), T("Tanpa Kotak", "No Box") };
             float px = stage.X + S(14f);
@@ -1476,8 +1544,8 @@ namespace TranslatorLive
                 }
             }
             string samplePrev = (_styleTargetAreaId > 0 && _cfg.FindArea(_styleTargetAreaId) != null && _cfg.FindArea(_styleTargetAreaId).Mode == AreaTextMode.Choice)
-                ? "• Aku belum yakin.\n• Aku ikut!"
-                : "Kamu harus cepat. Susul aku nanti!";
+                ? (_cfg.ToneMode == 0 ? "• Gue belom yakin sih.\n• Gas, gue ikut!" : "• Aku belum yakin.\n• Aku ikut!")
+                : (_cfg.ToneMode == 0 ? "Lo mesti cepet. Susul gue nanti ya!" : "Kamu harus cepat. Susul aku nanti!");
             OverlayPane.DrawOverlayText(g, samplePrev, SR(ovBox.X + st.Padding, ovBox.Y + topPad, ovBox.Width - st.Padding * 2f, ovBox.Height - topPad - S(8f)), st);
 
             cy += S(190f);
@@ -1566,51 +1634,74 @@ namespace TranslatorLive
             float colGap = S(14f);
             bool twoCol = (w >= S(620f));
             float colW = twoCol ? (w - colGap) * 0.5f : w;
-            float colH = S(684f);
+            float colH = S(676f);
 
             RectangleF left = SR(x, cy, colW, colH);
-            Theme.DrawCard(g, pal, left, S(16f));
-            float lx = left.X + S(18f), lw2 = left.Width - S(36f), ly = left.Y + S(18f);
+            Theme.DrawCard(g, pal, left, S(12f));
+            float lx = left.X + S(18f), lw2 = left.Width - S(36f), ly = left.Y + S(14f);
 
             // UI Language Selector (Indonesia | English)
             if (lw2 >= S(316f))
             {
-                Theme.DrawTextLeft(g, T("Bahasa Aplikasi", "App Language"), fSmB, pal.TextSub, SR(lx, ly, S(130f), S(32f)));
-                RectangleF langBox = SR(lx + lw2 - S(176f), ly, S(176f), S(32f));
+                Theme.DrawTextLeft(g, T("Bahasa Aplikasi", "App Language"), fSmB, pal.TextSub, SR(lx, ly, S(130f), S(30f)));
+                RectangleF langBox = SR(lx + lw2 - S(176f), ly, S(176f), S(30f));
                 Theme.FillRR(g, langBox, S(9f), pal.Well);
                 Theme.DrawRR(g, langBox, S(9f), pal.Border, 1f);
-                DrawSegItem(g, pal, "UILANG_id", SR(langBox.X + S(3f), langBox.Y + S(3f), S(84f), S(26f)), "Indonesia", _cfg.UiLang != "en", fCap);
-                DrawSegItem(g, pal, "UILANG_en", SR(langBox.X + S(89f), langBox.Y + S(3f), S(84f), S(26f)), "English", _cfg.UiLang == "en", fCap);
-                ly += S(44f);
+                DrawSegItem(g, pal, "UILANG_id", SR(langBox.X + S(3f), langBox.Y + S(3f), S(84f), S(24f)), "Indonesia", _cfg.UiLang != "en", fCap);
+                DrawSegItem(g, pal, "UILANG_en", SR(langBox.X + S(89f), langBox.Y + S(3f), S(84f), S(24f)), "English", _cfg.UiLang == "en", fCap);
+                ly += S(38f);
             }
             else
             {
-                Theme.DrawTextLeft(g, T("Bahasa Aplikasi", "App Language"), fSmB, pal.TextSub, SR(lx, ly, lw2, S(28f)));
-                ly += S(30f);
-                RectangleF langBox = SR(lx, ly, S(176f), S(32f));
+                Theme.DrawTextLeft(g, T("Bahasa Aplikasi", "App Language"), fSmB, pal.TextSub, SR(lx, ly, lw2, S(24f)));
+                ly += S(26f);
+                RectangleF langBox = SR(lx, ly, S(176f), S(30f));
                 Theme.FillRR(g, langBox, S(9f), pal.Well);
                 Theme.DrawRR(g, langBox, S(9f), pal.Border, 1f);
-                DrawSegItem(g, pal, "UILANG_id", SR(langBox.X + S(3f), langBox.Y + S(3f), S(84f), S(26f)), "Indonesia", _cfg.UiLang != "en", fCap);
-                DrawSegItem(g, pal, "UILANG_en", SR(langBox.X + S(89f), langBox.Y + S(3f), S(84f), S(26f)), "English", _cfg.UiLang == "en", fCap);
-                ly += S(44f);
+                DrawSegItem(g, pal, "UILANG_id", SR(langBox.X + S(3f), langBox.Y + S(3f), S(84f), S(24f)), "Indonesia", _cfg.UiLang != "en", fCap);
+                DrawSegItem(g, pal, "UILANG_en", SR(langBox.X + S(89f), langBox.Y + S(3f), S(84f), S(24f)), "English", _cfg.UiLang == "en", fCap);
+                ly += S(38f);
             }
 
-            DrawSliderRow(g, pal, "SL_INTERVAL", SR(lx, ly, lw2, S(34f)), T("Interval Scan", "Scan Interval"), _cfg.Interval + " ms", _cfg.Interval, 100, 1200, fSmB);
-            ly += S(44f);
+            // Translation Tone Selector (Gaul | Santai | Baku)
+            Theme.DrawTextLeft(g, T("Gaya Bahasa", "Tone Style"), fSmB, pal.TextSub, SR(lx, ly, S(112f), S(30f)));
+            float toneW = Math.Min(S(236f), lw2 - S(116f));
+            RectangleF toneBox = SR(lx + lw2 - toneW, ly, toneW, S(30f));
+            Theme.FillRR(g, toneBox, S(9f), pal.Well);
+            Theme.DrawRR(g, toneBox, S(9f), pal.Border, 1f);
+            float twSeg = (toneW - S(6f)) / 3f;
+            DrawSegItem(g, pal, "TONE_0", SR(toneBox.X + S(3f), toneBox.Y + S(3f), twSeg, S(24f)), "Gaul", _cfg.ToneMode == 0, fCap);
+            DrawSegItem(g, pal, "TONE_1", SR(toneBox.X + S(3f) + twSeg, toneBox.Y + S(3f), twSeg, S(24f)), "Santai", _cfg.ToneMode == 1, fCap);
+            DrawSegItem(g, pal, "TONE_2", SR(toneBox.X + S(3f) + twSeg * 2f, toneBox.Y + S(3f), twSeg, S(24f)), "Baku", _cfg.ToneMode == 2, fCap);
+            ly += S(38f);
 
-            string idleLabel = _cfg.AutoHideSeconds == 0 ? T("Mati", "Off") : (_cfg.AutoHideSeconds + ( _cfg.UiLang == "en" ? " sec" : " dtk"));
-            DrawSliderRow(g, pal, "SL_AUTOHIDE", SR(lx, ly, lw2, S(34f)), "Auto Blank", idleLabel, _cfg.AutoHideSeconds, 0, 30, fSmB);
-            ly += S(48f);
+            // Background Texture Selector (Arsiran | Grid | Dot | Polos)
+            Theme.DrawTextLeft(g, T("Pola Latar", "Bg Texture"), fSmB, pal.TextSub, SR(lx, ly, S(112f), S(30f)));
+            RectangleF patBox = SR(lx + lw2 - toneW, ly, toneW, S(30f));
+            Theme.FillRR(g, patBox, S(9f), pal.Well);
+            Theme.DrawRR(g, patBox, S(9f), pal.Border, 1f);
+            float pwSeg = (toneW - S(6f)) / 4f;
+            string[] patLbls = new string[] { T("Arsir", "Hatch"), "Grid", "Dot", T("Polos", "Flat") };
+            for (int pi = 0; pi < 4; pi++)
+                DrawSegItem(g, pal, "PAT_" + pi, SR(patBox.X + S(3f) + pi * pwSeg, patBox.Y + S(3f), pwSeg, S(24f)), patLbls[pi], _cfg.BgPattern == pi, fCap);
+            ly += S(38f);
 
-            DrawToggleRow(g, pal, "SYS_ENHANCE_OCR", SR(lx, ly, lw2, S(38f)), T("Penjernih Teks Game & Kontras OCR", "Game Text Clarity & OCR Contrast"), _cfg.EnhanceGameOcr, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_NATURAL", SR(lx, ly, lw2, S(38f)), T("Bahasa Sehari-hari Sopan & Natural", "Natural Conversational Tone"), _cfg.NaturalTone, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_SPEAKER", SR(lx, ly, lw2, S(38f)), T("Deteksi Nama Pembicara (Speaker Badge)", "Detect Speaker Name (Speaker Badge)"), _cfg.DetectSpeaker, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(38f)), T("Tunggu teks berhenti mengetik", "Wait for typing animation to finish"), _cfg.WaitStable, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(38f)), T("Gabung baris (mode Dialog)", "Merge lines (Dialog mode)"), _cfg.MergeLines, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(38f)), T("Sembunyikan kotak saat kosong", "Hide overlay when empty"), _cfg.HideEmpty, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(38f)), T("Otomatis Live saat dibuka", "Auto-start Live on launch"), _cfg.AutoLive, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(38f)), T("Tutup ke System Tray", "Minimize to System Tray on close"), _cfg.CloseToTray, fBody); ly += S(44f);
-            DrawToggleRow(g, pal, "SYS_AUTO_UPDATE", SR(lx, ly, lw2, S(38f)), T("Periksa Pembaruan Otomatis", "Check updates automatically"), _cfg.AutoCheckUpdate, fBody); ly += S(48f);
+            DrawSliderRow(g, pal, "SL_INTERVAL", SR(lx, ly, lw2, S(30f)), T("Interval Scan", "Scan Interval"), _cfg.Interval + " ms", _cfg.Interval, 60, 1000, fSmB);
+            ly += S(36f);
+
+            string idleLabel = _cfg.AutoHideSeconds == 0 ? T("Mati", "Off") : (_cfg.AutoHideSeconds + (_cfg.UiLang == "en" ? " sec" : " dtk"));
+            DrawSliderRow(g, pal, "SL_AUTOHIDE", SR(lx, ly, lw2, S(30f)), "Auto Blank", idleLabel, _cfg.AutoHideSeconds, 0, 30, fSmB);
+            ly += S(38f);
+
+            DrawToggleRow(g, pal, "SYS_ENHANCE_OCR", SR(lx, ly, lw2, S(32f)), T("Perjelas Huruf OCR Tanpa Jeda (Anti-Bg)", "Zero-Delay Borderless OCR Enhancer"), _cfg.EnhanceGameOcr, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_INSTANT_SUB", SR(lx, ly, lw2, S(32f)), T("Mode Subtitle Langsung & Anti-Ganti Arti", "Instant Subtitle + Anti-Flip-Flop Lock"), _cfg.InstantSubtitleMode, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_SPEAKER", SR(lx, ly, lw2, S(32f)), T("Deteksi Nama Pembicara (Speaker Badge)", "Detect Speaker Name (Speaker Badge)"), _cfg.DetectSpeaker, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(32f)), T("Tunggu animasi mesin ketik (RPG klasik)", "Wait for typewriter animation (classic RPG)"), _cfg.WaitStable, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(32f)), T("Gabung baris (mode Dialog)", "Merge lines (Dialog mode)"), _cfg.MergeLines, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(32f)), T("Sembunyikan kotak saat kosong", "Hide overlay when empty"), _cfg.HideEmpty, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(32f)), T("Otomatis Live saat dibuka", "Auto-start Live on launch"), _cfg.AutoLive, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(32f)), T("Tutup ke System Tray", "Minimize to System Tray on close"), _cfg.CloseToTray, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_AUTO_UPDATE", SR(lx, ly, lw2, S(32f)), T("Periksa Pembaruan Otomatis", "Check updates automatically"), _cfg.AutoCheckUpdate, fSm); ly += S(40f);
 
             float halfBtn = (lw2 - S(8f)) * 0.5f;
             int glossCount = string.IsNullOrWhiteSpace(_cfg.Glossary) ? 0 : _cfg.Glossary.Split(new char[] { ';', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries).Length;
@@ -1711,10 +1802,10 @@ namespace TranslatorLive
                 SR(upCard.X + S(18f), upCard.Y + S(18f), icSz, icSz), icCol, 2f);
 
             string statusTitle = hasUp
-                ? T("🎉 Tersedia Pembaruan: " + UpdateChecker.Info.LatestVersion + "!", "🎉 New Update Available: " + UpdateChecker.Info.LatestVersion + "!")
+                ? T("Tersedia Pembaruan: " + UpdateChecker.Info.LatestVersion + "!", "New Update Available: " + UpdateChecker.Info.LatestVersion + "!")
                 : (isChecking
                     ? T("Memeriksa Pembaruan ke GitHub...", "Checking for updates on GitHub...")
-                    : T("LingoLens v0.2 Beta — Versi Terbaru", "LingoLens v0.2 Beta — Latest Version"));
+                    : T("LingoLens v0.3 Beta — Versi Terbaru", "LingoLens v0.3 Beta — Latest Version"));
 
             string statusDesc = hasUp
                 ? T("Rilis resmi terbaru dari Danzyyy telah tersedia di GitHub. Klik tombol untuk mengunduh sekarang.",
@@ -1750,6 +1841,33 @@ namespace TranslatorLive
             }
 
             cy += chkH + S(16f);
+
+            // Card v0.3 Beta
+            RectangleF card3 = SR(x, cy, w, S(268f));
+            Theme.DrawCard(g, pal, card3, S(12f));
+
+            RectangleF vPill3 = SR(card3.X + S(18f), card3.Y + S(14f), S(86f), S(24f));
+            Theme.FillRR(g, vPill3, S(12f), pal.Accent);
+            Theme.DrawTextCenter(g, "v0.3 Beta", fCap, pal.AccentBtnText, vPill3);
+
+            string title3 = T("Rombak UI Arsiran, OCR Temporal Tanpa Background, Bahasa Gaul & Lore Game", "Editorial Hatch UI, Temporal Borderless OCR, Slang Mode & Game Lore");
+            string notes3 = _cfg.UiLang == "en"
+                ? "• Redesigned Studio UI with architectural diagonal hatch / grid background, High-DPI scaling & custom dark-chrome modals.\n" +
+                  "• 2-Frame Temporal Background Eraser + Auto-Crop Active Text Band + Local High-Pass OCR for borderless 3D subtitles.\n" +
+                  "• Target Game Window Lock: lock OCR to your active game/browser window and auto-pause on Alt+Tab.\n" +
+                  "• Indonesian Gaul Mode (Gue/Lo) default + Santai + Formal tone selector, plus Lore-aware Gemini context.\n" +
+                  "• Pre-Game Selector & Auto Game Lore Finder: 14 built-in presets + online Wikipedia lore & auto-glossary fetcher.\n" +
+                  "• Pixel-Space Static Subtitle Lock & Trigram Anti-Flip-Flop + Session Dialog Backlog viewer."
+                : "• Rombak total UI dengan latar arsiran diagonal / grid, skala High-DPI otomatis, ikon HUD gaming & modal dark-chrome kustom.\n" +
+                  "• Temporal Background Eraser 2-Frame + Auto-Crop Pita Teks + Local High-Pass OCR untuk subtitle tanpa kotak di adegan 3D.\n" +
+                  "• Kunci Jendela Game: kunci OCR ke proses game/browser aktif — otomatis jeda & sembunyikan overlay saat Alt+Tab.\n" +
+                  "• Mode Bahasa Gaul (Gue/Lo) bawaan + pilihan Santai & Baku, lengkap dengan konteks cerita buat Gemini AI.\n" +
+                  "• Pilih Game & Cari Lore Otomatis: 14 preset game populer + pencarian lore Wikipedia & auto-glosarium karakter.\n" +
+                  "• Pengunci Piksel Subtitle Statis & Trigram Anti-Flip-Flop + fitur Riwayat Dialog sesi.";
+
+            Theme.DrawTextLeft(g, title3, fSec, pal.Text, SR(vPill3.Right + S(12f), card3.Y + S(14f), card3.Width - S(136f), S(24f)));
+            Theme.DrawTextWrap(g, notes3, fSm, pal.TextSub, SR(card3.X + S(18f), card3.Y + S(48f), card3.Width - S(36f), card3.Height - S(58f)));
+            cy += card3.Height + S(16f);
 
             // Card v0.2 Beta
             RectangleF card2 = SR(x, cy, w, S(280f));
@@ -2280,7 +2398,22 @@ namespace TranslatorLive
                     return T("Geser untuk mengatur waktu otomatis menyembunyikan overlay saat tidak ada teks", "Drag to adjust idle timeout before auto-hiding overlay");
 
                 case "SYS_ENHANCE_OCR":
-                    return T("Penjernih Teks Game: Bersihkan background 3D, pertajam warna font karakter & hilangkan karakter aneh", "Game OCR Enhancer: Clean 3D background noise, boost character font contrast & eliminate garbled characters");
+                    return T("Perjelas Huruf OCR Tanpa Jeda: isolasi outline gelap teks tanpa kotak background agar tidak ngawur", "Zero-Delay Borderless OCR Enhancer: isolates dark-outlined subtitle glyphs from 3D scenes");
+
+                case "SYS_INSTANT_SUB":
+                    return T("Mode Subtitle Langsung & Anti-Ganti Arti: terjemah langsung tanpa jeda ketik & kunci arti agar tidak berubah-ubah", "Instant Subtitle + Anti-Flip-Flop Lock: translates immediately and prevents meaning jitter");
+
+                case "BTN_GAME_LORE":
+                    return T("Pilih game sebelum main & cari lore + glosarium nama karakter otomatis", "Pick a game and auto-fetch lore & character glossary");
+
+                case "BTN_LOCK_WINDOW":
+                    return T("Kunci OCR hanya ke jendela game/video tertentu agar saat Alt+Tab ke aplikasi lain OCR otomatis jeda", "Lock OCR to a specific game/app window so Alt+Tab pauses OCR automatically");
+
+                case "BTN_HISTORY":
+                    return T("Buka riwayat dialog yang sudah diterjemahkan di sesi ini", "Open session dialog translation history");
+
+                case "BTN_CYCLE_PATTERN":
+                    return T("Ganti tekstur latar belakang aplikasi (Arsiran Diagonal, Grid Blueprint, Dot Matrix, Polos)", "Cycle app background texture (Diagonal Hatch, Blueprint Grid, Dot Matrix, Solid)");
 
                 case "SYS_NATURAL":
                     return T("Gunakan gaya bahasa santai sehari-hari yang luwes & natural (hindari kata kaku/robot)", "Use natural polite everyday gaming tone (avoids stiff robotic translations)");
@@ -2383,7 +2516,7 @@ namespace TranslatorLive
                     else if (id == "SL_OUTLINE") { st.Outline = v; st.UseCustom = (_styleTargetAreaId > 0); }
                     else if (id == "SL_CORNER") { st.Corner = v; st.UseCustom = (_styleTargetAreaId > 0); }
                     else if (id == "SL_PAD") { st.Padding = v; st.UseCustom = (_styleTargetAreaId > 0); }
-                    else if (id == "SL_INTERVAL") _cfg.Interval = Math.Max(100, ((v + 20) / 40) * 40);
+                    else if (id == "SL_INTERVAL") _cfg.Interval = Math.Max(60, ((v + 10) / 20) * 20);
                     else if (id == "SL_AUTOHIDE") _cfg.AutoHideSeconds = v;
                     _overlay.UpdateTexts();
                     Invalidate();
@@ -2457,6 +2590,25 @@ namespace TranslatorLive
                 Invalidate();
                 return;
             }
+            if (id.StartsWith("TONE_"))
+            {
+                _cfg.ToneMode = Math.Max(0, Math.Min(2, int.Parse(id.Substring(5))));
+                _cfg.NaturalTone = (_cfg.ToneMode != 2);
+                _cfg.Save();
+                _engine.ClearState();
+                _engine.ForceScanNow();
+                string tn = _cfg.ToneMode == 0 ? "Gaul (Gue/Lo)" : (_cfg.ToneMode == 1 ? "Santai (Aku/Kamu)" : "Baku / Formal");
+                ShowToast("Gaya bahasa: " + tn, Palette.For(_cfg.Dark).Live);
+                Invalidate();
+                return;
+            }
+            if (id.StartsWith("PAT_"))
+            {
+                _cfg.BgPattern = Math.Max(0, Math.Min(3, int.Parse(id.Substring(4))));
+                _cfg.Save();
+                Invalidate();
+                return;
+            }
             if (id.StartsWith("ENG_"))
             {
                 string nextEng = id.Substring(4);
@@ -2497,6 +2649,16 @@ namespace TranslatorLive
                 case "BTN_THEME": _cfg.Dark = !_cfg.Dark; _cfg.Save(); ApplyDwm(); Invalidate(); break;
 
                 case "BTN_SAVE_PROFILE": PromptSaveGameProfile(); break;
+                case "BTN_LOCK_WINDOW": PromptWindowLockPicker(); break;
+                case "BTN_GAME_LORE": PromptGameLorePicker(); break;
+                case "BTN_HISTORY": PromptDialogBacklog(); break;
+                case "BTN_CYCLE_PATTERN":
+                    _cfg.BgPattern = (_cfg.BgPattern + 1) % 4;
+                    _cfg.Save();
+                    string[] pNames = new string[] { "Arsiran Diagonal", "Grid Blueprint", "Dot Matrix", "Polos" };
+                    ShowToast("Latar: " + pNames[_cfg.BgPattern], Palette.For(_cfg.Dark).Live);
+                    Invalidate();
+                    break;
                 case "BTN_GEMINI_KEY": PromptGeminiKey(); break;
                 case "BTN_GLOSSARY": PromptGlossary(); break;
 
@@ -2590,7 +2752,8 @@ namespace TranslatorLive
                 case "PICK_SPEAKER": PickColor(3); break;
 
                 case "SYS_ENHANCE_OCR": _cfg.EnhanceGameOcr = !_cfg.EnhanceGameOcr; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
-                case "SYS_NATURAL": _cfg.NaturalTone = !_cfg.NaturalTone; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
+                case "SYS_INSTANT_SUB": _cfg.InstantSubtitleMode = !_cfg.InstantSubtitleMode; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
+                case "SYS_NATURAL": _cfg.NaturalTone = !_cfg.NaturalTone; _cfg.ToneMode = _cfg.NaturalTone ? 0 : 2; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_SPEAKER": _cfg.DetectSpeaker = !_cfg.DetectSpeaker; _cfg.Save(); _engine.ClearState(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_STABLE": _cfg.WaitStable = !_cfg.WaitStable; _cfg.Save(); Invalidate(); break;
                 case "SYS_MERGE": _cfg.MergeLines = !_cfg.MergeLines; _cfg.Save(); _engine.ForceScanNow(); Invalidate(); break;

@@ -11,7 +11,7 @@ namespace TranslatorLive
     public class UpdateInfo
     {
         public bool HasUpdate = false;
-        public string CurrentVersion = "v0.2-beta";
+        public string CurrentVersion = "v0.3-beta";
         public string LatestVersion = "";
         public string ReleaseName = "";
         public string ReleaseUrl = "https://github.com/danzyyy19/LingoLens/releases/latest";
@@ -25,7 +25,7 @@ namespace TranslatorLive
 
     public static class UpdateChecker
     {
-        public const string CurrentVersion = "v0.2-beta";
+        public const string CurrentVersion = "v0.3-beta";
         public const string RepoApiUrl = "https://api.github.com/repos/danzyyy19/LingoLens/releases/latest";
         public const string RepoHtmlUrl = "https://github.com/danzyyy19/LingoLens/releases/latest";
 

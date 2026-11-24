@@ -648,6 +648,14 @@ namespace TranslatorLive
         public bool LiveVisible { get; private set; }
         public bool EditMode { get; private set; }
         public bool UserHidden { get; set; }
+        public bool TargetPaused { get; private set; }
+
+        public void SetTargetPaused(bool paused)
+        {
+            if (TargetPaused == paused) return;
+            TargetPaused = paused;
+            if (!EditMode) Rebuild();
+        }
 
         public event Action OnLayoutUpdated;
         public event Action OnRequestAddArea;
@@ -689,12 +697,12 @@ namespace TranslatorLive
                         if (_cfg.Areas[i].Mode == AreaTextMode.Choice)
                         {
                             _cfg.Areas[i].LastSpeaker = "";
-                            _cfg.Areas[i].LastText = "• Aku belum yakin.\n• Aku ikut!";
+                            _cfg.Areas[i].LastText = _cfg.ToneMode == 0 ? "• Gue belom yakin sih.\n• Gas, gue ikut!" : "• Aku belum yakin.\n• Aku ikut!";
                         }
                         else
                         {
                             _cfg.Areas[i].LastSpeaker = _cfg.DetectSpeaker ? "Saria" : "";
-                            _cfg.Areas[i].LastText = "Kamu harus cepat. Susul aku nanti!";
+                            _cfg.Areas[i].LastText = _cfg.ToneMode == 0 ? "Lo mesti cepet. Susul gue nanti ya!" : "Kamu harus cepat. Susul aku nanti!";
                         }
                     }
                 }
@@ -705,7 +713,7 @@ namespace TranslatorLive
         public void UpdateTexts()
         {
             if (!LiveVisible && !EditMode) return;
-            if (UserHidden && !EditMode) { ClearWindows(); return; }
+            if ((UserHidden || TargetPaused) && !EditMode) { ClearWindows(); return; }
 
             if (_cfg.Placement == 2)
             {
@@ -746,7 +754,7 @@ namespace TranslatorLive
         {
             ClearWindows();
             if (!LiveVisible && !EditMode) return;
-            if (UserHidden && !EditMode) return;
+            if ((UserHidden || TargetPaused) && !EditMode) return;
 
             List<Area> list;
             lock (_cfg.Sync)
