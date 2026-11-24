@@ -43,10 +43,13 @@ $SrcFiles = @(
     (Join-Path $Root "src\Program.cs")
 )
 
+$ManifestPath = Join-Path $Root "app.manifest"
+
 Write-Host "Building LingoLens.exe..."
 & $Csc /nologo /target:winexe /platform:x64 /optimize+ `
     "/out:$OutExe" `
     "/win32icon:$IconPath" `
+    "/win32manifest:$ManifestPath" `
     "/res:$IconPrev,LingoLensIcon.png" `
     /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Security.dll /r:System.Windows.Forms.dll `
     "/r:$FwDir\System.Runtime.dll" `

@@ -30,33 +30,6 @@ namespace TranslatorLive
             catch { try { Native.SetProcessDPIAware(); } catch { } }
         }
 
-        private static void TakeOverExistingInstances()
-        {
-            try
-            {
-                int myPid = System.Diagnostics.Process.GetCurrentProcess().Id;
-                foreach (System.Diagnostics.Process p in System.Diagnostics.Process.GetProcesses())
-                {
-                    try
-                    {
-                        if (p.Id == myPid) continue;
-                        string n = (p.ProcessName ?? "").ToLowerInvariant();
-                        if (n.StartsWith("lingolens") || n.StartsWith("translatorlive"))
-                        {
-                            try { p.CloseMainWindow(); } catch { }
-                            if (!p.WaitForExit(350))
-                            {
-                                try { p.Kill(); p.WaitForExit(500); } catch { }
-                            }
-                        }
-                    }
-                    catch { }
-                    finally { try { p.Dispose(); } catch { } }
-                }
-            }
-            catch { }
-        }
-
         [STAThread]
         static int Main(string[] args)
         {
@@ -69,11 +42,24 @@ namespace TranslatorLive
                 return RunSelfTest();
             }
 
-            // Guarantee ONLY ONE LingoLens instance runs (auto-closes any old tray instance so hotkeys, status & history never desync!)
-            TakeOverExistingInstances();
+            // Standard Windows single-instance Mutex (avoids Process.GetProcesses/Kill AV heuristics!)
+            bool createdNew;
+            using (System.Threading.Mutex singleInstanceMutex = new System.Threading.Mutex(true, @"Local\LingoLens_SingleInstance_Mutex", out createdNew))
+            {
+                if (!createdNew)
+                {
+                    MessageBox.Show(
+                        "LingoLens sudah berjalan (cek ikon di System Tray kanan bawah).",
+                        "LingoLens",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                    return 0;
+                }
 
-            AppConfig cfg = AppConfig.Load();
-            Application.Run(new MainWindow(cfg));
+                AppConfig cfg = AppConfig.Load();
+                Application.Run(new MainWindow(cfg));
+                GC.KeepAlive(singleInstanceMutex);
+            }
             return 0;
         }
 
