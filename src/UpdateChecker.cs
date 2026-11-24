@@ -25,9 +25,29 @@ namespace TranslatorLive
 
     public static class UpdateChecker
     {
-        public const string CurrentVersion = "v0.3-beta";
+        public static readonly string CurrentVersion = ResolveCurrentVersion();
         public const string RepoApiUrl = "https://api.github.com/repos/danzyyy19/LingoLens/releases/latest";
         public const string RepoHtmlUrl = "https://github.com/danzyyy19/LingoLens/releases/latest";
+
+        private static string ResolveCurrentVersion()
+        {
+            try
+            {
+                object[] attrs = System.Reflection.Assembly.GetExecutingAssembly()
+                    .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false);
+                if (attrs != null && attrs.Length > 0)
+                {
+                    string v = ((System.Reflection.AssemblyInformationalVersionAttribute)attrs[0]).InformationalVersion;
+                    if (!string.IsNullOrWhiteSpace(v))
+                    {
+                        v = v.Trim().Replace(' ', '-').ToLowerInvariant();
+                        return v.StartsWith("v") ? v : ("v" + v);
+                    }
+                }
+            }
+            catch { }
+            return "v0.3-beta";
+        }
 
         private static readonly UpdateInfo _info = new UpdateInfo();
         public static UpdateInfo Info { get { return _info; } }

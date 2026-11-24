@@ -20,7 +20,7 @@ jobs:
         shell: powershell
         run: |
           .\build.ps1
-          $ver = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "v0.3-beta" }
+          $ver = if ($env:GITHUB_REF_NAME) { $env:GITHUB_REF_NAME } else { "v0.4-beta" }
           $zipPath = "dist\LingoLens-$ver-Windows-x64.zip"
           Compress-Archive -Path "dist\LingoLens-Portable.exe", "README.md", "LICENSE" -DestinationPath $zipPath -Force
           Push-Location dist
@@ -37,7 +37,15 @@ jobs:
           body: |
             ### LingoLens ${{ github.ref_name }} — by Danzyyy
 
-            Pilih salah satu file di bawah sesuai kebutuhan:
+            #### Apa yang Baru & Diperbaiki di v0.4 Beta
+            - **Perbaikan OCR Font Putih + Border Hitam Tipis di Background Putih:** Menambahkan Pass 4 (`ApplyThinDarkBorderFillEnhancer`) berbasis *Morphological Closing* dan memperkecil langkah sampling mask agar border tipis tidak terlewat.
+            - **Pengurangan Latensi & Penguatan Anti-Flip-Flop:** Menambahkan *Smart Early-Exit* pada Pass 1–4, mempercepat *settle guard* & *fast-poll* (`40 ms`), menaikkan *empty-frame debounce* menjadi 4 frame, mewajibkan *2-frame consensus* saat mengganti subtitle aktif, serta mengunci *partial subset* saat background berubah.
+            - **Dukungan Edge-Case Game Sulit:** Ekstraksi teks berwarna/neon di background terang, perluasan deteksi kertas perkamen bertekstur, filter tinggi baris *furigana* untuk CJK, perbaikan skor CJK & bahasa Latin Eropa, serta auto-deteksi ekspansi *typewriter*.
+            - **Opsi Screenshot / Rekam Overlay Hasil:** Toggle baru di tab Sistem untuk mengizinkan atau menyembunyikan overlay hasil terjemahan dari screenshot/rekaman OBS (tetap terlindungi otomatis pada mode Tutup Asli agar tidak terjadi loop OCR).
+            - **Keamanan & Utilitas:** Enkripsi `geminiKey` dengan Windows DPAPI (tidak ikut tersimpan di profil `.ini`), ekspor riwayat dialog ke `.txt`/`.csv`, deteksi konflik hotkey global, handler `WM_DPICHANGED`, sinkronisasi versi otomatis, serta logger ringan `debug.log`.
+            - **Refactoring Arsitektur:** Memecah `TranslationEngine.cs` menjadi 4 modul `partial class`.
+
+            #### Unduh File
             - **`LingoLens-Portable.exe`** — Langsung jalankan tanpa instalasi (pengaturan tersimpan di folder yang sama).
             - **`Setup-LingoLens.exe`** — Installer Windows lengkap dengan shortcut Start Menu, Desktop, dan Uninstaller.
             - **`LingoLens-${{ github.ref_name }}-Windows-x64.zip`** — Arsip ZIP berisi versi Portable + README + LICENSE.

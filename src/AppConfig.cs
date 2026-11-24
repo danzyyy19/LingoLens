@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace TranslatorLive
@@ -87,6 +88,7 @@ namespace TranslatorLive
         public bool TrayTipShown = false;
         public bool AutoCheckUpdate = true;
         public bool EnhanceGameOcr = true; // Penjernih teks game & isolasi outline tanpa jeda
+        public bool AllowOverlayCapture = false; // Izinkan overlay hasil terjemahan ikut terekam/di-screenshot (mode Terpisah/Gabung)
 
         public int Placement = 0; // 0 = terpisah, 1 = tutup asli, 2 = gabung
         public Rectangle MergedRect = Rectangle.Empty;
@@ -237,9 +239,34 @@ namespace TranslatorLive
             return s;
         }
 
-        public void Save() { SaveToFile(FilePath); }
+        private static string ProtectSecret(string plain)
+        {
+            if (string.IsNullOrEmpty(plain)) return "";
+            try
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(plain);
+                byte[] enc = ProtectedData.Protect(bytes, null, DataProtectionScope.CurrentUser);
+                return "dpapi:" + Convert.ToBase64String(enc);
+            }
+            catch { return plain; }
+        }
 
-        public void SaveToFile(string path)
+        private static string UnprotectSecret(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            if (!raw.StartsWith("dpapi:", StringComparison.Ordinal)) return raw;
+            try
+            {
+                byte[] enc = Convert.FromBase64String(raw.Substring(6));
+                byte[] dec = ProtectedData.Unprotect(enc, null, DataProtectionScope.CurrentUser);
+                return Encoding.UTF8.GetString(dec);
+            }
+            catch { return ""; }
+        }
+
+        public void Save() { SaveToFile(FilePath, true); }
+
+        public void SaveToFile(string path, bool includeSecrets = true)
         {
             try
             {
@@ -258,7 +285,8 @@ namespace TranslatorLive
                     sb.AppendLine("src=" + Src);
                     sb.AppendLine("tgt=" + Tgt);
                     sb.AppendLine("engine=" + Engine);
-                    sb.AppendLine("geminiKey=" + GeminiApiKey);
+                    if (includeSecrets)
+                        sb.AppendLine("geminiKey=" + ProtectSecret(GeminiApiKey));
                     sb.AppendLine("toneMode=" + ToneMode);
                     sb.AppendLine("natural=" + (ToneMode != 2 ? 1 : 0));
                     sb.AppendLine("detectSpeaker=" + (DetectSpeaker ? 1 : 0));
@@ -274,6 +302,7 @@ namespace TranslatorLive
                     sb.AppendLine("trayTip=" + (TrayTipShown ? 1 : 0));
                     sb.AppendLine("autoCheckUpdate=" + (AutoCheckUpdate ? 1 : 0));
                     sb.AppendLine("enhanceOcr=" + (EnhanceGameOcr ? 1 : 0));
+                    sb.AppendLine("allowOverlayCapture=" + (AllowOverlayCapture ? 1 : 0));
                     sb.AppendLine("placement=" + Placement);
                     sb.AppendLine("merged=" + R(MergedRect));
                     sb.AppendLine("globalStyle=" + SerializeStyle(GlobalStyle));
@@ -286,7 +315,7 @@ namespace TranslatorLive
                 Directory.CreateDirectory(Path.GetDirectoryName(path));
                 File.WriteAllText(path, sb.ToString(), Encoding.UTF8);
             }
-            catch { }
+            catch (Exception ex) { AppLogger.Error("AppConfig", "Failed to save config to " + path, ex); }
         }
 
         public static AppConfig Load() { return LoadFromFile(FilePath); }
@@ -319,7 +348,7 @@ namespace TranslatorLive
                         case "src": c.Src = v; break;
                         case "tgt": c.Tgt = v; break;
                         case "engine": c.Engine = v; break;
-                        case "geminiKey": c.GeminiApiKey = v; break;
+                        case "geminiKey": c.GeminiApiKey = UnprotectSecret(v); break;
                         case "toneMode":
                             c.ToneMode = Math.Max(0, Math.Min(2, n));
                             c.NaturalTone = (c.ToneMode != 2);
@@ -342,6 +371,7 @@ namespace TranslatorLive
                         case "autoCheckUpdate": c.AutoCheckUpdate = n != 0; break;
                         case "enhanceOcr":
                         case "enhanceocr": c.EnhanceGameOcr = n != 0; break;
+                        case "allowOverlayCapture": c.AllowOverlayCapture = n != 0; break;
                         case "placement": c.Placement = Math.Max(0, Math.Min(2, n)); break;
                         case "merged": c.MergedRect = ParseRect(v); break;
                         case "globalStyle": c.GlobalStyle = ParseStyle(v, c.GlobalStyle); break;
@@ -368,7 +398,7 @@ namespace TranslatorLive
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { AppLogger.Error("AppConfig", "Failed to load config from " + path, ex); }
             return c;
         }
 
@@ -401,7 +431,7 @@ namespace TranslatorLive
             string clean = SanitizeProfileName(gameTitle);
             ActiveProfile = clean;
             string p = Path.Combine(ProfilesDir, clean + ".ini");
-            SaveToFile(p);
+            SaveToFile(p, false);
             Save();
         }
 

@@ -28,11 +28,15 @@ $PortableExe = Join-Path $DistDir "LingoLens-Portable.exe"
 
 $SrcFiles = @(
     (Join-Path $Root "src\Native.cs"),
+    (Join-Path $Root "src\AppLogger.cs"),
     (Join-Path $Root "src\AppConfig.cs"),
     (Join-Path $Root "src\Theme.cs"),
     (Join-Path $Root "src\GameLoreService.cs"),
     (Join-Path $Root "src\Modals.cs"),
     (Join-Path $Root "src\TranslationEngine.cs"),
+    (Join-Path $Root "src\TranslationEngine.OcrPreprocessing.cs"),
+    (Join-Path $Root "src\TranslationEngine.TextProcessing.cs"),
+    (Join-Path $Root "src\TranslationEngine.Providers.cs"),
     (Join-Path $Root "src\UpdateChecker.cs"),
     (Join-Path $Root "src\OverlayManager.cs"),
     (Join-Path $Root "src\MainWindow.cs"),
@@ -44,8 +48,9 @@ Write-Host "Building LingoLens.exe..."
     "/out:$OutExe" `
     "/win32icon:$IconPath" `
     "/res:$IconPrev,LingoLensIcon.png" `
-    /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll `
+    /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Security.dll /r:System.Windows.Forms.dll `
     "/r:$FwDir\System.Runtime.dll" `
+    "/r:$FwDir\System.Runtime.WindowsRuntime.dll" `
     "/r:$WinMd\Windows.Foundation.winmd" `
     "/r:$WinMd\Windows.Media.winmd" `
     "/r:$WinMd\Windows.Graphics.winmd" `

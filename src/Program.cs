@@ -13,9 +13,9 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("Danzyyy")]
 [assembly: AssemblyProduct("LingoLens")]
 [assembly: AssemblyCopyright("Copyright © 2026 Danzyyy")]
-[assembly: AssemblyVersion("0.3.0.0")]
-[assembly: AssemblyFileVersion("0.3.0.0")]
-[assembly: AssemblyInformationalVersion("0.3 Beta")]
+[assembly: AssemblyVersion("0.4.0.0")]
+[assembly: AssemblyFileVersion("0.4.0.0")]
+[assembly: AssemblyInformationalVersion("0.4 Beta")]
 
 namespace TranslatorLive
 {
@@ -182,6 +182,33 @@ namespace TranslatorLive
                             if (string.IsNullOrEmpty(glowNorm) || !glowNorm.ToLowerInvariant().Contains("forbidden") || !glowNorm.ToLowerInvariant().Contains("triforce"))
                             {
                                 LogTest("[FAIL] Floating cutscene subtitle OCR failed: " + glowNorm);
+                                return 1;
+                            }
+                        }
+
+                        // Test White Font + Thin Black Border over Pure White Background (Bug #1 regression test!)
+                        using (Bitmap whiteBgBmp = new Bitmap(920, 140, PixelFormat.Format32bppArgb))
+                        {
+                            using (Graphics gw = Graphics.FromImage(whiteBgBmp))
+                            {
+                                gw.Clear(Color.FromArgb(255, 255, 255)); // Pure white game background
+                                gw.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                                using (System.Drawing.Drawing2D.GraphicsPath gp = new System.Drawing.Drawing2D.GraphicsPath())
+                                using (Font ff = new Font("Segoe UI", 26f, FontStyle.Bold))
+                                {
+                                    gp.AddString("The white snow hides the secret path.", ff.FontFamily, (int)FontStyle.Bold, 30f, new PointF(40f, 48f), StringFormat.GenericTypographic);
+                                    using (Pen thinBorder = new Pen(Color.FromArgb(220, 18, 18, 18), 2.0f) { LineJoin = System.Drawing.Drawing2D.LineJoin.Round })
+                                        gw.DrawPath(thinBorder, gp);
+                                    using (SolidBrush whiteFill = new SolidBrush(Color.White))
+                                        gw.FillPath(whiteFill, gp);
+                                }
+                            }
+                            string wbOcr = eng.RecognizeBitmap(whiteBgBmp, "en", out usedOnline, out err);
+                            string wbNorm = TranslationEngine.NormalizeText(wbOcr, "en", true);
+                            LogTest("[OCR-WHITE-ON-WHITE-BORDER] '" + wbNorm + "'");
+                            if (string.IsNullOrEmpty(wbNorm) || !wbNorm.ToLowerInvariant().Contains("snow") || !wbNorm.ToLowerInvariant().Contains("secret"))
+                            {
+                                LogTest("[FAIL] White font with thin black border on white background OCR failed: " + wbNorm);
                                 return 1;
                             }
                         }
@@ -429,12 +456,9 @@ namespace TranslatorLive
                             }
                         }
 
-                        // Test v0.4 Real Uploaded Game Cutscene Screenshots if present on disk!
-                        string[] realShots = new string[]
-                        {
-                            @"C:\Users\Dani\.gemini\antigravity\brain\f1951b95-e57d-4f5a-9b45-5671968a81d6\.user_uploaded\media_1795455412540_da9d6a34.jpg",
-                            @"C:\Users\Dani\.gemini\antigravity\brain\f1951b95-e57d-4f5a-9b45-5671968a81d6\.user_uploaded\media_1795455674242_d44a8d00.jpg"
-                        };
+                        // Test optional real cutscene fixtures if present in ./tests/fixtures
+                        string fixturesDir = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "tests", "fixtures");
+                        string[] realShots = Directory.Exists(fixturesDir) ? Directory.GetFiles(fixturesDir, "*.jpg") : new string[0];
                         foreach (string rsPath in realShots)
                         {
                             if (File.Exists(rsPath))
@@ -529,7 +553,7 @@ namespace TranslatorLive
                 LogTest("[PROFILE-OK] GameProfile & Per-Area Style roundtrip passed.");
 
                 string outDir = Path.GetDirectoryName(Application.ExecutablePath);
-                string brainDir = @"C:\Users\danic\.gemini\antigravity\brain\a4be1715-04e8-4b64-be13-1a44e8d8f78d";
+                string brainDir = Environment.GetEnvironmentVariable("LINGOLENS_AUDIT_DIR") ?? "";
                 using (MainWindow w = new MainWindow(new AppConfig()))
                 {
                     w.Show();

@@ -389,7 +389,19 @@ namespace TranslatorLive
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
-            try { Native.SetWindowDisplayAffinity(Handle, 0x00000011); } catch { }
+            ApplyCaptureAffinity(_cfg);
+        }
+
+        public void ApplyCaptureAffinity(AppConfig cfg)
+        {
+            if (!IsHandleCreated) return;
+            try
+            {
+                // Allow screenshot/recording ONLY on Result overlays when user opted in AND not covering the OCR box (Placement != 1)
+                bool allowCapture = !IsOcrFrame && cfg != null && cfg.AllowOverlayCapture && cfg.Placement != 1;
+                Native.SetWindowDisplayAffinity(Handle, allowCapture ? 0x00000000u : 0x00000011u);
+            }
+            catch { }
         }
 
         public void KeepTopmost()
@@ -411,6 +423,7 @@ namespace TranslatorLive
         {
             _cfg = cfg;
             if (!IsHandleCreated || Width < 8 || Height < 8) return;
+            ApplyCaptureAffinity(cfg);
 
             OverlayStyle st = ResolveStyle(cfg);
 

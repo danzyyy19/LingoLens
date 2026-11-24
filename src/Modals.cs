@@ -591,15 +591,50 @@ namespace TranslatorLive
             };
             Panel boxWrap = MakeInputFrame(pad, topY, innerW, boxH, scale, pal, tb);
 
-            Button btnClear = MakeButton(isEn ? "Clear Log" : "Bersihkan", pad, btnY, D(130f, scale), D(40f, scale), scale, pal, false, true);
+            Button btnClear = MakeButton(isEn ? "Clear Log" : "Bersihkan", pad, btnY, D(118f, scale), D(40f, scale), scale, pal, false, true);
             btnClear.Click += delegate
             {
                 if (onClear != null) onClear();
                 tb.Text = isEn ? "History cleared." : "Riwayat dialog berhasil dibersihkan.";
             };
 
+            Button btnExport = MakeButton(isEn ? "Export (.txt)" : "Ekspor (.txt)", pad + D(126f, scale), btnY, D(128f, scale), D(40f, scale), scale, pal, false, false);
+            btnExport.Click += delegate
+            {
+                try
+                {
+                    if (logs.Count == 0) return;
+                    using (SaveFileDialog sfd = new SaveFileDialog())
+                    {
+                        sfd.Filter = "Text File (*.txt)|*.txt|CSV File (*.csv)|*.csv";
+                        sfd.FileName = "LingoLens_Dialog_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt";
+                        if (sfd.ShowDialog(dlg) == DialogResult.OK)
+                        {
+                            if (sfd.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+                            {
+                                StringBuilder csv = new StringBuilder();
+                                csv.AppendLine("Time,Speaker,OCR,Translated");
+                                foreach (DialogLogEntry d in logs)
+                                {
+                                    csv.Append('"').Append(d.Time.ToString("HH:mm:ss")).Append("\",\"")
+                                       .Append((d.Speaker ?? "").Replace("\"", "\"\"")).Append("\",\"")
+                                       .Append((d.Source ?? "").Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ")).Append("\",\"")
+                                       .Append((d.Translated ?? "").Replace("\"", "\"\"").Replace("\r", " ").Replace("\n", " ")).AppendLine("\"");
+                                }
+                                System.IO.File.WriteAllText(sfd.FileName, csv.ToString(), Encoding.UTF8);
+                            }
+                            else
+                            {
+                                System.IO.File.WriteAllText(sfd.FileName, tb.Text ?? "", Encoding.UTF8);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) { AppLogger.Error("Modals", "Export dialog history failed", ex); }
+            };
+
             Button btnCopy = MakeButton(isEn ? "Copy All" : "Salin Semua",
-                dlg.ClientSize.Width - pad - D(274f, scale), btnY, D(136f, scale), D(40f, scale), scale, pal, false, false);
+                dlg.ClientSize.Width - pad - D(264f, scale), btnY, D(128f, scale), D(40f, scale), scale, pal, false, false);
             btnCopy.Click += delegate
             {
                 try
@@ -611,10 +646,10 @@ namespace TranslatorLive
             };
 
             Button btnClose = MakeButton(isEn ? "Close" : "Tutup",
-                dlg.ClientSize.Width - pad - D(128f, scale), btnY, D(128f, scale), D(40f, scale), scale, pal, true, false);
+                dlg.ClientSize.Width - pad - D(126f, scale), btnY, D(126f, scale), D(40f, scale), scale, pal, true, false);
             btnClose.Click += delegate { dlg.DialogResult = DialogResult.OK; dlg.Close(); };
 
-            dlg.Controls.AddRange(new Control[] { boxWrap, btnClear, btnCopy, btnClose });
+            dlg.Controls.AddRange(new Control[] { boxWrap, btnClear, btnExport, btnCopy, btnClose });
             dlg.Shown += delegate
             {
                 try { tb.SelectionStart = 0; tb.SelectionLength = 0; btnClose.Focus(); } catch { }

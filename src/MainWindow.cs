@@ -340,12 +340,19 @@ namespace TranslatorLive
 
         private void RegisterHotkeys()
         {
-            Native.RegisterHotKey(Handle, 1, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.E);
-            Native.RegisterHotKey(Handle, 2, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.Q);
-            Native.RegisterHotKey(Handle, 3, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.W);
-            Native.RegisterHotKey(Handle, 4, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.R);
-            Native.RegisterHotKey(Handle, 5, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.H);
-            Native.RegisterHotKey(Handle, 6, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.A);
+            List<string> failed = new List<string>();
+            if (!Native.RegisterHotKey(Handle, 1, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.E)) failed.Add("Alt+E");
+            if (!Native.RegisterHotKey(Handle, 2, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.Q)) failed.Add("Alt+Q");
+            if (!Native.RegisterHotKey(Handle, 3, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.W)) failed.Add("Alt+W");
+            if (!Native.RegisterHotKey(Handle, 4, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.R)) failed.Add("Alt+R");
+            if (!Native.RegisterHotKey(Handle, 5, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.H)) failed.Add("Alt+H");
+            if (!Native.RegisterHotKey(Handle, 6, Native.MOD_ALT | Native.MOD_NOREPEAT, (uint)Keys.A)) failed.Add("Alt+A");
+            if (failed.Count > 0)
+            {
+                string list = string.Join(", ", failed.ToArray());
+                AppLogger.Error("Hotkeys", "Global hotkey conflict: " + list);
+                ShowToast(T("Hotkey bentrok: " + list, "Hotkey conflict: " + list), Color.FromArgb(217, 119, 6));
+            }
         }
 
         private void UnregisterHotkeys()
@@ -372,6 +379,25 @@ namespace TranslatorLive
                 {
                     int targetId = _cfg.Placement == 2 ? 0 : _selectedAreaId;
                     BeginDesktopSnip(targetId, SnipTargetKind.Result);
+                }
+                return;
+            }
+
+            if (m.Msg == Native.WM_DPICHANGED)
+            {
+                int newDpi = m.WParam.ToInt32() & 0xFFFF;
+                if (newDpi >= 96)
+                {
+                    _dpiScale = Math.Max(1.0f, Math.Min(2.25f, newDpi / 96f));
+                    MinimumSize = new Size((int)Math.Round(780 * _dpiScale), (int)Math.Round(540 * _dpiScale));
+                    if (m.LParam != IntPtr.Zero)
+                    {
+                        Native.RECT suggested = (Native.RECT)Marshal.PtrToStructure(m.LParam, typeof(Native.RECT));
+                        Bounds = new Rectangle(suggested.Left, suggested.Top,
+                            Math.Max(MinimumSize.Width, suggested.Right - suggested.Left),
+                            Math.Max(MinimumSize.Height, suggested.Bottom - suggested.Top));
+                    }
+                    Invalidate();
                 }
                 return;
             }
@@ -1699,6 +1725,7 @@ namespace TranslatorLive
             DrawToggleRow(g, pal, "SYS_STABLE", SR(lx, ly, lw2, S(32f)), T("Tunggu animasi mesin ketik (RPG klasik)", "Wait for typewriter animation (classic RPG)"), _cfg.WaitStable, fSm); ly += S(36f);
             DrawToggleRow(g, pal, "SYS_MERGE", SR(lx, ly, lw2, S(32f)), T("Gabung baris (mode Dialog)", "Merge lines (Dialog mode)"), _cfg.MergeLines, fSm); ly += S(36f);
             DrawToggleRow(g, pal, "SYS_HIDEEMPTY", SR(lx, ly, lw2, S(32f)), T("Sembunyikan kotak saat kosong", "Hide overlay when empty"), _cfg.HideEmpty, fSm); ly += S(36f);
+            DrawToggleRow(g, pal, "SYS_ALLOW_CAP", SR(lx, ly, lw2, S(32f)), T("Izinkan Screenshot / Rekam Overlay Hasil", "Allow Screenshot / Record Result Overlay"), _cfg.AllowOverlayCapture, fSm); ly += S(36f);
             DrawToggleRow(g, pal, "SYS_AUTOLIVE", SR(lx, ly, lw2, S(32f)), T("Otomatis Live saat dibuka", "Auto-start Live on launch"), _cfg.AutoLive, fSm); ly += S(36f);
             DrawToggleRow(g, pal, "SYS_TRAY", SR(lx, ly, lw2, S(32f)), T("Tutup ke System Tray", "Minimize to System Tray on close"), _cfg.CloseToTray, fSm); ly += S(36f);
             DrawToggleRow(g, pal, "SYS_AUTO_UPDATE", SR(lx, ly, lw2, S(32f)), T("Periksa Pembaruan Otomatis", "Check updates automatically"), _cfg.AutoCheckUpdate, fSm); ly += S(40f);
@@ -2758,6 +2785,18 @@ namespace TranslatorLive
                 case "SYS_STABLE": _cfg.WaitStable = !_cfg.WaitStable; _cfg.Save(); Invalidate(); break;
                 case "SYS_MERGE": _cfg.MergeLines = !_cfg.MergeLines; _cfg.Save(); _engine.ForceScanNow(); Invalidate(); break;
                 case "SYS_HIDEEMPTY": _cfg.HideEmpty = !_cfg.HideEmpty; _cfg.Save(); _overlay.UpdateTexts(); Invalidate(); break;
+                case "SYS_ALLOW_CAP":
+                    _cfg.AllowOverlayCapture = !_cfg.AllowOverlayCapture;
+                    _cfg.Save();
+                    _overlay.Rebuild();
+                    if (_cfg.AllowOverlayCapture && _cfg.Placement == 1)
+                        ShowToast(T("Aktif (gunakan mode Terpisah/Gabung agar tidak menimpa OCR)", "Enabled (use Separate/Merged mode so OCR is not covered)"), Color.FromArgb(217, 119, 6));
+                    else
+                        ShowToast(_cfg.AllowOverlayCapture
+                            ? T("Overlay hasil kini bisa di-screenshot / direkam", "Result overlay can now be screenshotted / recorded")
+                            : T("Overlay hasil disembunyikan dari screenshot", "Result overlay hidden from screenshots"), Color.FromArgb(16, 185, 129));
+                    Invalidate();
+                    break;
                 case "SYS_AUTOLIVE": _cfg.AutoLive = !_cfg.AutoLive; _cfg.Save(); Invalidate(); break;
                 case "SYS_TRAY": _cfg.CloseToTray = !_cfg.CloseToTray; _cfg.Save(); Invalidate(); break;
                 case "SYS_AUTO_UPDATE": _cfg.AutoCheckUpdate = !_cfg.AutoCheckUpdate; _cfg.Save(); Invalidate(); break;
