@@ -348,7 +348,7 @@ namespace TranslatorLive
         {
             if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
             TextRenderingHint prev = g.TextRenderingHint;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             using (SolidBrush br = new SolidBrush(c))
             using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
             {
@@ -365,7 +365,7 @@ namespace TranslatorLive
         {
             if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
             TextRenderingHint prev = g.TextRenderingHint;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             using (SolidBrush br = new SolidBrush(c))
             using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
             {
@@ -382,7 +382,7 @@ namespace TranslatorLive
         {
             if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
             TextRenderingHint prev = g.TextRenderingHint;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             using (SolidBrush br = new SolidBrush(c))
             using (StringFormat sf = new StringFormat(StringFormatFlags.NoWrap))
             {
@@ -399,7 +399,7 @@ namespace TranslatorLive
         {
             if (string.IsNullOrEmpty(text) || r.Width <= 1f || r.Height <= 1f) return;
             TextRenderingHint prev = g.TextRenderingHint;
-            g.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
+            g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
             using (SolidBrush br = new SolidBrush(c))
             using (StringFormat sf = new StringFormat())
             {
