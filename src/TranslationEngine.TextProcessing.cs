@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -732,7 +732,7 @@ namespace TranslatorLive
                     c == '%' || c == '$' || c == '+' || c == '=' || c == '\\' || c == '/' || c == '{' || c == '}' || c == '•' || c == '„' || c == 'ß')
                     score -= 20;
                 else if (!isCjk && !isEuroLatin && c > 127 && c != '’' && c != '“' && c != '”' && c != '…' && c != '—' && c != '•')
-                    score -= 16;
+                    score -= (c == '€' || c == '£' || c == '¥' || c == '§' || c == '¤' || c == '©' || c == '®') ? 34 : 18;
             }
             if (isCjk && cjkChars == 0 && s.Length >= 3) score -= 45;
             if ((quoteCount & 1) == 1) score -= 16; // Penalize unmatched stray double-quote artifacts (e.g. Whenever" wapt%talk)
@@ -752,8 +752,11 @@ namespace TranslatorLive
                 score -= Regex.Matches(s, @"\b[a-z]{3,}(?:sw|lr|cl|zr|qn|vx|xz|jw|kw|bf|df|gf|pf|tf|vt|zp)\b", RegexOptions.IgnoreCase).Count * 18;
                 // Penalize glued mega-words & impossible 3D-noise consonant/bigram glitches (e.g. "kryown", "Icevto", "alononat", "kidzup", "haueltohelp")
                 score -= Regex.Matches(s, @"\b[a-zA-Z]{16,}\b").Count * 22;
-                score -= Regex.Matches(s, @"(?:kry|vto|zup|dzup|nonat|lwee|coul\b|gu\s+es|wontt)", RegexOptions.IgnoreCase).Count * 20;
+                score -= Regex.Matches(s, @"(?:kry|vto|zup|dzup|nonat|lwee|coul\b|gu\s+es|wontt|qq|tlh|wvo|haq)", RegexOptions.IgnoreCase).Count * 20;
                 score -= Regex.Matches(s, @"[bcdfghjklmnpqrstvwxz]{5,}", RegexOptions.IgnoreCase).Count * 16;
+                // Penalize stray leading hyphen/apostrophe glitches on words (e.g. "-And", "'its", "'Realm.") and broken hyphen splits (e.g. "sacr-ed")
+                score -= Regex.Matches(s, @"(?:^|\s)[-'][A-Za-z]").Count * 14;
+                score -= Regex.Matches(s, @"\b[a-z]{3,}-[a-z]{1,2}\b", RegexOptions.IgnoreCase).Count * 16;
 
                 string[] words = Regex.Split(s, @"\s+");
                 int validWords = 0;

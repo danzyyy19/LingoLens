@@ -999,9 +999,10 @@ namespace TranslatorLive
                 GraphicsState vpState = g.Save();
                 g.SetClip(vp);
 
-                // Responsive content width: adapts cleanly from 1080p up to 2K/4K/ultrawide screens
-                float contentW = Math.Min(S(1760f), Math.Max(S(640f), vp.Width - S(48f)));
-                float cx = (float)Math.Round(vp.X + (vp.Width - contentW) * 0.5f);
+                // Responsive content width: adapts cleanly from narrow/175%-zoom windows up to 2K/4K/ultrawide screens without ever overlapping the sidebar
+                float availW = Math.Max(220f, vp.Width - S(28f));
+                float contentW = Math.Min(S(1760f), availW);
+                float cx = (float)Math.Round(vp.X + Math.Max(S(14f), (vp.Width - contentW) * 0.5f));
                 float cy = (float)Math.Round(vp.Y + S(12f) - _scrollY);
 
                 float totalH = 0f;
