@@ -101,7 +101,7 @@ namespace TranslatorLive
         private readonly List<string> _fonts = new List<string>();
         private float _dpiScale = 1.0f;
 
-        private float Z { get { return Math.Max(0.80f, Math.Min(2.40f, _dpiScale * (_cfg.UiZoom / 100f))); } }
+        private float Z { get { return Math.Max(0.80f, Math.Min(2.65f, _dpiScale * (_cfg.UiZoom / 100f))); } }
         private float S(float v) { return (float)Math.Round(v * Z); }
         private RectangleF SR(float x, float y, float w, float h)
         {
@@ -111,12 +111,16 @@ namespace TranslatorLive
         public MainWindow(AppConfig cfg)
         {
             _cfg = cfg;
+            Rectangle scrInit = Screen.PrimaryScreen.WorkingArea;
             try
             {
                 uint sysDpi = Native.GetDpiForSystem();
                 if (sysDpi >= 96) _dpiScale = Math.Max(1.0f, Math.Min(2.25f, sysDpi / 96f));
             }
             catch { _dpiScale = 1.0f; }
+            // Auto resolution-aware scaling for 2K (2560px) and 4K (3840px) monitors running at 100% Windows DPI
+            if (scrInit.Width >= 3200 && _dpiScale < 1.45f) _dpiScale = 1.45f;
+            else if (scrInit.Width >= 2400 && _dpiScale < 1.18f) _dpiScale = 1.18f;
 
             if (_cfg.Areas.Count == 0)
             {
@@ -136,9 +140,8 @@ namespace TranslatorLive
             Text = "LingoLens — by Danzyyy";
             FormBorderStyle = FormBorderStyle.None;
             StartPosition = FormStartPosition.CenterScreen;
-            Rectangle scrInit = Screen.PrimaryScreen.WorkingArea;
-            int initW = Math.Min((int)Math.Round(1180 * _dpiScale), scrInit.Width * 92 / 100);
-            int initH = Math.Min((int)Math.Round(790 * _dpiScale), scrInit.Height * 92 / 100);
+            int initW = Math.Min((int)Math.Round(1240 * _dpiScale), scrInit.Width * 88 / 100);
+            int initH = Math.Min((int)Math.Round(810 * _dpiScale), scrInit.Height * 88 / 100);
             Size = new Size(Math.Max(860, initW), Math.Max(600, initH));
             MinimumSize = new Size((int)Math.Round(780 * _dpiScale), (int)Math.Round(540 * _dpiScale));
             DoubleBuffered = true;
@@ -935,7 +938,7 @@ namespace TranslatorLive
                     T("Sembunyikan ke Tray", "Minimize to Tray"), IconKind.Tray, fCap);
 
                 if (ch - (by + S(100f)) >= S(22f))
-                    Theme.DrawTextCenter(g, "v0.3 Beta  •  by Danzyyy", fCap, pal.TextMute, SR(S(16f), ch - S(26f), sideW - S(32f), S(22f)));
+                    Theme.DrawTextCenter(g, "v0.4 Beta  •  by Danzyyy", fCap, pal.TextMute, SR(S(16f), ch - S(26f), sideW - S(32f), S(22f)));
 
                 // 2. TOP WINDOW CHROME BAR
                 float wx = cw - S(10f);
@@ -996,7 +999,8 @@ namespace TranslatorLive
                 GraphicsState vpState = g.Save();
                 g.SetClip(vp);
 
-                float contentW = Math.Min(S(1120f), vp.Width - S(48f));
+                // Responsive content width: adapts cleanly from 1080p up to 2K/4K/ultrawide screens
+                float contentW = Math.Min(S(1760f), Math.Max(S(640f), vp.Width - S(48f)));
                 float cx = (float)Math.Round(vp.X + (vp.Width - contentW) * 0.5f);
                 float cy = (float)Math.Round(vp.Y + S(12f) - _scrollY);
 
@@ -1832,7 +1836,7 @@ namespace TranslatorLive
                 ? T("Tersedia Pembaruan: " + UpdateChecker.Info.LatestVersion + "!", "New Update Available: " + UpdateChecker.Info.LatestVersion + "!")
                 : (isChecking
                     ? T("Memeriksa Pembaruan ke GitHub...", "Checking for updates on GitHub...")
-                    : T("LingoLens v0.3 Beta — Versi Terbaru", "LingoLens v0.3 Beta — Latest Version"));
+                    : T("LingoLens v0.4 Beta — Versi Terbaru", "LingoLens v0.4 Beta — Latest Version"));
 
             string statusDesc = hasUp
                 ? T("Rilis resmi terbaru dari Danzyyy telah tersedia di GitHub. Klik tombol untuk mengunduh sekarang.",
@@ -1868,6 +1872,32 @@ namespace TranslatorLive
             }
 
             cy += chkH + S(16f);
+
+            // Card v0.4 Beta
+            RectangleF card4 = SR(x, cy, w, S(248f));
+            Theme.DrawCard(g, pal, card4, S(12f));
+
+            RectangleF vPill4 = SR(card4.X + S(18f), card4.Y + S(14f), S(86f), S(24f));
+            Theme.FillRR(g, vPill4, S(12f), pal.Accent);
+            Theme.DrawTextCenter(g, "v0.4 Beta", fCap, pal.AccentBtnText, vPill4);
+
+            string title4 = T("OCR Border Tipis di Background Putih, Anti-Flip-Flop, Screenshot Overlay & 2K/4K UI", "White-on-White Border OCR, Anti-Flip-Flop, Overlay Screenshot & 2K/4K UI");
+            string notes4 = _cfg.UiLang == "en"
+                ? "• Pass 4 Thin-Border Fill OCR (Morphological Closing) for white text with thin black outline on white/snow backgrounds.\n" +
+                  "• Lower latency (Smart Early-Exit Pass 1-4, 40ms fast-poll) + stronger Anti-Flip-Flop lock when background changes.\n" +
+                  "• Edge-case OCR: colored/neon subtitles, textured parchment, CJK furigana filter & auto-typewriter detection.\n" +
+                  "• Allow/Hide Result Overlay in Screenshots/OBS toggle + Dialog History export (.txt/.csv) + DPAPI key encryption.\n" +
+                  "• Responsive 2K/4K layout scaling, Per-Monitor DPI (WM_DPICHANGED), hotkey conflict alert & modular engine."
+                : "• Pass 4 OCR Border Tipis (Morphological Closing) untuk font putih + garis hitam tipis di background putih/salju.\n" +
+                  "• Latensi lebih cepat (Smart Early-Exit Pass 1-4, fast-poll 40ms) + kunci Anti-Flip-Flop lebih kuat saat background berubah.\n" +
+                  "• Edge-case OCR: teks warna/neon, kertas perkamen bertekstur, filter furigana CJK & auto-deteksi typewriter.\n" +
+                  "• Toggle Izinkan Screenshot/Rekam Overlay Hasil + Ekspor Riwayat Dialog (.txt/.csv) + enkripsi API Key DPAPI.\n" +
+                  "• Layout responsif layar 2K/4K, Per-Monitor DPI (WM_DPICHANGED), deteksi konflik hotkey & arsitektur modular.";
+
+            Theme.DrawTextLeft(g, title4, fBodyB, pal.Text, SR(card4.X + S(114f), card4.Y + S(14f), card4.Width - S(132f), S(24f)));
+            Theme.DrawTextWrap(g, notes4, fSm, pal.TextSub, SR(card4.X + S(18f), card4.Y + S(48f), card4.Width - S(36f), S(186f)));
+
+            cy += card4.Height + S(14f);
 
             // Card v0.3 Beta
             RectangleF card3 = SR(x, cy, w, S(268f));

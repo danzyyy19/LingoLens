@@ -511,7 +511,7 @@ namespace TranslatorLive
             HttpWebRequest req = (HttpWebRequest)WebRequest.Create(url);
             req.Timeout = timeoutMs;
             req.ReadWriteTimeout = timeoutMs;
-            req.UserAgent = "LingoLens/0.3 (GameLoreFetcher; Windows)";
+            req.UserAgent = "LingoLens/0.4 (GameLoreFetcher; Windows)";
             req.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
             using (HttpWebResponse res = (HttpWebResponse)req.GetResponse())
             using (StreamReader sr = new StreamReader(res.GetResponseStream(), Encoding.UTF8))
